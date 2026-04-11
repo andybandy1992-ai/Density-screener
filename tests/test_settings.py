@@ -18,6 +18,8 @@ class SettingsTests(unittest.TestCase):
         config = load_config(path)
 
         self.assertTrue(config.strict_mode)
+        self.assertEqual(config.control_state_file, "../state/runtime_controls.json")
+        self.assertEqual(config.control_state_path.name, "runtime_controls.json")
         self.assertEqual(config.global_blacklist, ("AAAUSDT",))
         self.assertEqual(config.blacklist_file, "blacklist.txt")
         self.assertIn("bybit_spot", config.exchanges)

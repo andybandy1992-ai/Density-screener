@@ -19,8 +19,9 @@ class EvaluatedLevel:
 
 
 class DensityDetector:
-    def __init__(self, config: DetectionConfig) -> None:
+    def __init__(self, config: DetectionConfig, min_notional_provider: object | None = None) -> None:
         self._config = config
+        self._min_notional_provider = min_notional_provider or config
         self._candidates: dict[CandidateKey, CandidateState] = {}
         self._alerted: dict[CandidateKey, datetime] = {}
 
@@ -33,7 +34,7 @@ class DensityDetector:
         current_time = now or snapshot.timestamp
         threshold = max(
             volume_reference.avg_candle_notional * self._config.volume_multiplier,
-            self._config.min_notional_for(snapshot.market_type),
+            self._min_notional_provider.min_notional_for(snapshot.market_type),
         )
 
         valid_levels = self._collect_levels(snapshot, threshold, volume_reference)

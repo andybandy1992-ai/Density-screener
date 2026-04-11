@@ -16,6 +16,7 @@
 4. Fill `.env` from `deploy/systemd/density-screener.env.example`.
 5. Edit `config/app.toml`.
 6. Edit `config/blacklist.txt` with markets or coins you want to skip.
+7. Use `/panel` in Telegram after startup if you want to change global thresholds or the bot-managed blacklist without touching files.
 
 ## Changing thresholds later
 
@@ -31,6 +32,14 @@ You can change the global minimum filters any time:
 After changing them, restart the service:
 
 - `sudo systemctl restart density-screener`
+
+## Runtime state
+
+The bot-managed settings are persisted in the runtime state file configured by `app.control_state_file`.
+
+By default this is:
+
+- `/opt/density-screener/state/runtime_controls.json`
 
 ## Blacklist rules
 

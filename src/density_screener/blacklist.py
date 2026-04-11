@@ -131,6 +131,49 @@ def ensure_blacklist_matcher(value: BlacklistMatcher | Iterable[str]) -> Blackli
     return BlacklistMatcher.load(inline_terms=value)
 
 
+def merge_matchers(*matchers: BlacklistMatcher) -> BlacklistMatcher:
+    exact_symbols: set[str] = set()
+    base_assets: set[str] = set()
+    patterns: list[str] = []
+    entries_count = 0
+    source_paths: list[str] = []
+
+    for matcher in matchers:
+        exact_symbols.update(matcher.exact_symbols)
+        base_assets.update(matcher.base_assets)
+        patterns.extend(matcher.patterns)
+        entries_count += matcher.entries_count
+        if matcher.source_path:
+            source_paths.append(matcher.source_path)
+
+    return BlacklistMatcher(
+        exact_symbols=frozenset(exact_symbols),
+        base_assets=frozenset(base_assets),
+        patterns=tuple(patterns),
+        entries_count=entries_count,
+        source_path=",".join(source_paths),
+    )
+
+
+def normalize_blacklist_term(raw_term: str) -> str | None:
+    stripped = raw_term.strip()
+    if not stripped or stripped.startswith("#"):
+        return None
+    if ":" in stripped:
+        prefix, value = stripped.split(":", 1)
+        normalized_value = _normalize_value(value)
+        if not normalized_value:
+            return None
+        normalized_prefix = prefix.strip().lower()
+        if normalized_prefix not in {"coin", "base", "symbol", "pattern"}:
+            return None
+        return f"{normalized_prefix}:{normalized_value}"
+    normalized = _normalize_value(stripped)
+    if not normalized:
+        return None
+    return normalized
+
+
 def _normalize_value(value: str) -> str:
     return value.strip().upper()
 

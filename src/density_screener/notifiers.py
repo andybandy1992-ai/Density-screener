@@ -35,17 +35,28 @@ class TelegramNotifier:
     def enabled(self) -> bool:
         return self._config.enabled and bool(self._config.bot_token and self._config.chat_id)
 
+    def api_url(self, method: str) -> str:
+        return f"https://api.telegram.org/bot{self._config.bot_token}/{method}"
+
     def build_message(self, signal: DensitySignal) -> TelegramMessage:
         return self.build_text_message(format_signal(signal))
 
-    def build_text_message(self, text: str) -> TelegramMessage:
+    def build_text_message(
+        self,
+        text: str,
+        *,
+        reply_markup: dict[str, Any] | None = None,
+    ) -> TelegramMessage:
+        payload: dict[str, Any] = {
+            "chat_id": self._config.chat_id,
+            "text": text,
+            "disable_web_page_preview": True,
+        }
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
         return TelegramMessage(
-            url=f"https://api.telegram.org/bot{self._config.bot_token}/sendMessage",
-            payload={
-                "chat_id": self._config.chat_id,
-                "text": text,
-                "disable_web_page_preview": True,
-            },
+            url=self.api_url("sendMessage"),
+            payload=payload,
         )
 
     async def send(self, signal: DensitySignal) -> bool:

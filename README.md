@@ -65,6 +65,20 @@ You can change the global minimum density filters at any time without touching c
 
 The `doctor` command prints the active values after all overrides are applied.
 
+## Telegram control panel
+
+When the live service is running with Telegram enabled, open the bot panel by sending `/panel` in the configured Telegram group.
+
+From the panel you can:
+
+- change the global spot minimum threshold;
+- change the global futures minimum threshold;
+- add a bot-managed blacklist rule;
+- remove a bot-managed blacklist rule;
+- view the current bot-managed blacklist.
+
+These controls are shared across all enabled exchanges and are persisted in the runtime state file.
+
 ## Useful commands
 
 - `python -m density_screener.cli doctor`
@@ -88,6 +102,7 @@ You can exclude markets in two places:
 
 - inline in `config/app.toml` via `[market].global_blacklist`
 - line-by-line in `config/blacklist.txt`
+- dynamically from Telegram via the bot-managed runtime blacklist
 
 Supported rule shapes:
 

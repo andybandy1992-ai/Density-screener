@@ -47,6 +47,8 @@ class ExchangeConfig:
 class AppConfig:
     timezone: str
     strict_mode: bool
+    control_state_file: str
+    control_state_path: Path
     detection: DetectionConfig
     telegram: TelegramConfig
     global_blacklist: tuple[str, ...]
@@ -64,6 +66,10 @@ def load_config(path: str | Path) -> AppConfig:
     telegram_raw = raw.get("telegram", {})
     market_raw = raw.get("market", {})
     exchanges_raw = raw.get("exchanges", {})
+    control_state_file = str(app_raw.get("control_state_file", "../state/runtime_controls.json"))
+    control_state_path = _resolve_optional_path(file_path, control_state_file)
+    if control_state_path is None:
+        control_state_path = file_path.parent.parent / "state" / "runtime_controls.json"
 
     detection = DetectionConfig(
         volume_multiplier=float(detection_raw["volume_multiplier"]),
@@ -106,6 +112,8 @@ def load_config(path: str | Path) -> AppConfig:
     return AppConfig(
         timezone=str(app_raw.get("timezone", "UTC")),
         strict_mode=bool(app_raw.get("strict_mode", True)),
+        control_state_file=control_state_file,
+        control_state_path=control_state_path,
         detection=detection,
         telegram=telegram,
         global_blacklist=global_blacklist,

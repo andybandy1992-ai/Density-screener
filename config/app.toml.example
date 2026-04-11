@@ -1,6 +1,7 @@
 [app]
 timezone = "Europe/Kaliningrad"
 strict_mode = true
+control_state_file = "../state/runtime_controls.json"
 
 [detection]
 volume_multiplier = 5.0

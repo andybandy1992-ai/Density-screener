@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import suppress
 from pathlib import Path
 import sys
 from typing import Callable
@@ -18,7 +19,9 @@ from density_screener.exchanges.kucoin_futures import KuCoinFuturesAdapter
 from density_screener.exchanges.kucoin_spot import KuCoinSpotAdapter
 from density_screener.notifiers import TelegramNotifier
 from density_screener.runtime import ScreenerRuntime
+from density_screener.runtime_controls import RuntimeControlStore
 from density_screener.settings import load_config
+from density_screener.telegram_control_bot import TelegramControlBot
 
 
 AdapterFactory = Callable[[object], object]
@@ -110,14 +113,18 @@ def _doctor(config_path: Path) -> int:
         print(f"Config file not found: {config_path}")
         return 1
     config = load_config(config_path)
+    controls = _build_runtime_controls(config)
     print(f"timezone={config.timezone}")
     print(f"strict_mode={config.strict_mode}")
-    print(f"spot_min_notional_usd={config.detection.spot_min_notional_usd:.0f}")
-    print(f"futures_min_notional_usd={config.detection.futures_min_notional_usd:.0f}")
+    print(f"control_state_file={config.control_state_file}")
+    print(f"control_state_path={config.control_state_path}")
+    print(f"spot_min_notional_usd={controls.min_notional_for('spot'):.0f}")
+    print(f"futures_min_notional_usd={controls.min_notional_for('futures'):.0f}")
     print(f"volume_multiplier={config.detection.volume_multiplier:.2f}")
     print(f"price_window_pct={config.detection.price_window_pct:.2f}")
     print(f"min_lifetime_seconds={config.detection.min_lifetime_seconds:.1f}")
     print(f"blacklist_size={config.blacklist.entries_count}")
+    print(f"runtime_blacklist_terms={len(controls.snapshot().blacklist_terms)}")
     print(f"blacklist_inline={len(config.global_blacklist)}")
     print(f"blacklist_exact={len(config.blacklist.exact_symbols)}")
     print(f"blacklist_base_assets={len(config.blacklist.base_assets)}")
@@ -144,7 +151,13 @@ async def _run_bybit_spot(config_path: Path, symbol_limit: int, max_snapshots: i
         print(f"Config file not found: {config_path}")
         return 1
     config = load_config(config_path)
-    await _run_named_exchange(config, "bybit_spot", symbol_limit, max_snapshots)
+    controls = _build_runtime_controls(config)
+    await _run_with_optional_control_bot(
+        config,
+        controls,
+        _run_named_exchange(config, "bybit_spot", symbol_limit, max_snapshots, controls),
+        start_bot=max_snapshots is None,
+    )
     return 0
 
 
@@ -153,7 +166,13 @@ async def _run_bitget_spot(config_path: Path, symbol_limit: int, max_snapshots: 
         print(f"Config file not found: {config_path}")
         return 1
     config = load_config(config_path)
-    await _run_named_exchange(config, "bitget_spot", symbol_limit, max_snapshots)
+    controls = _build_runtime_controls(config)
+    await _run_with_optional_control_bot(
+        config,
+        controls,
+        _run_named_exchange(config, "bitget_spot", symbol_limit, max_snapshots, controls),
+        start_bot=max_snapshots is None,
+    )
     return 0
 
 
@@ -162,7 +181,13 @@ async def _run_kucoin_spot(config_path: Path, symbol_limit: int, max_snapshots: 
         print(f"Config file not found: {config_path}")
         return 1
     config = load_config(config_path)
-    await _run_named_exchange(config, "kucoin_spot", symbol_limit, max_snapshots)
+    controls = _build_runtime_controls(config)
+    await _run_with_optional_control_bot(
+        config,
+        controls,
+        _run_named_exchange(config, "kucoin_spot", symbol_limit, max_snapshots, controls),
+        start_bot=max_snapshots is None,
+    )
     return 0
 
 
@@ -171,7 +196,13 @@ async def _run_kucoin_futures(config_path: Path, symbol_limit: int, max_snapshot
         print(f"Config file not found: {config_path}")
         return 1
     config = load_config(config_path)
-    await _run_named_exchange(config, "kucoin_futures", symbol_limit, max_snapshots)
+    controls = _build_runtime_controls(config)
+    await _run_with_optional_control_bot(
+        config,
+        controls,
+        _run_named_exchange(config, "kucoin_futures", symbol_limit, max_snapshots, controls),
+        start_bot=max_snapshots is None,
+    )
     return 0
 
 
@@ -180,7 +211,13 @@ async def _run_htx_spot(config_path: Path, symbol_limit: int, max_snapshots: int
         print(f"Config file not found: {config_path}")
         return 1
     config = load_config(config_path)
-    await _run_named_exchange(config, "htx", symbol_limit, max_snapshots)
+    controls = _build_runtime_controls(config)
+    await _run_with_optional_control_bot(
+        config,
+        controls,
+        _run_named_exchange(config, "htx", symbol_limit, max_snapshots, controls),
+        start_bot=max_snapshots is None,
+    )
     return 0
 
 
@@ -189,7 +226,13 @@ async def _run_aster_futures(config_path: Path, symbol_limit: int, max_snapshots
         print(f"Config file not found: {config_path}")
         return 1
     config = load_config(config_path)
-    await _run_named_exchange(config, "aster", symbol_limit, max_snapshots)
+    controls = _build_runtime_controls(config)
+    await _run_with_optional_control_bot(
+        config,
+        controls,
+        _run_named_exchange(config, "aster", symbol_limit, max_snapshots, controls),
+        start_bot=max_snapshots is None,
+    )
     return 0
 
 
@@ -198,7 +241,13 @@ async def _run_hyperliquid(config_path: Path, symbol_limit: int, max_snapshots: 
         print(f"Config file not found: {config_path}")
         return 1
     config = load_config(config_path)
-    await _run_named_exchange(config, "hyperliquid", symbol_limit, max_snapshots)
+    controls = _build_runtime_controls(config)
+    await _run_with_optional_control_bot(
+        config,
+        controls,
+        _run_named_exchange(config, "hyperliquid", symbol_limit, max_snapshots, controls),
+        start_bot=max_snapshots is None,
+    )
     return 0
 
 
@@ -207,7 +256,13 @@ async def _run_lighter(config_path: Path, symbol_limit: int, max_snapshots: int 
         print(f"Config file not found: {config_path}")
         return 1
     config = load_config(config_path)
-    await _run_named_exchange(config, "lighter", symbol_limit, max_snapshots)
+    controls = _build_runtime_controls(config)
+    await _run_with_optional_control_bot(
+        config,
+        controls,
+        _run_named_exchange(config, "lighter", symbol_limit, max_snapshots, controls),
+        start_bot=max_snapshots is None,
+    )
     return 0
 
 
@@ -221,6 +276,7 @@ async def _run_enabled(
         print(f"Config file not found: {config_path}")
         return 1
     config = load_config(config_path)
+    controls = _build_runtime_controls(config)
     requested = _parse_exchange_names(selected_exchanges)
     available = _enabled_exchange_names(config.exchanges, requested)
     unknown = requested - set(ADAPTER_FACTORIES) if requested else set()
@@ -231,19 +287,28 @@ async def _run_enabled(
         return 1
 
     print(f"[supervisor] exchanges={','.join(available)}", flush=True)
-    tasks = [
-        asyncio.create_task(
-            _run_supervised_exchange(
-                config,
-                exchange_name,
-                symbol_limit=symbol_limit,
-                max_snapshots=max_snapshots,
+    async def runner() -> int:
+        tasks = [
+            asyncio.create_task(
+                _run_supervised_exchange(
+                    config,
+                    exchange_name,
+                    controls=controls,
+                    symbol_limit=symbol_limit,
+                    max_snapshots=max_snapshots,
+                )
             )
-        )
-        for exchange_name in available
-    ]
-    results = await asyncio.gather(*tasks)
-    return 0 if any(results) else 1
+            for exchange_name in available
+        ]
+        results = await asyncio.gather(*tasks)
+        return 0 if any(results) else 1
+
+    return await _run_with_optional_control_bot(
+        config,
+        controls,
+        runner(),
+        start_bot=max_snapshots is None,
+    )
 
 
 async def _run_named_exchange(
@@ -251,14 +316,15 @@ async def _run_named_exchange(
     exchange_name: str,
     symbol_limit: int | None,
     max_snapshots: int | None,
+    controls: RuntimeControlStore,
 ) -> None:
-    detector = DensityDetector(config.detection)
+    detector = DensityDetector(config.detection, min_notional_provider=controls)
     notifier = TelegramNotifier(config.telegram)
-    runtime = ScreenerRuntime(detector, notifier if notifier.enabled else None)
+    runtime = ScreenerRuntime(detector, notifier if notifier.enabled else None, controls=controls)
     adapter = ADAPTER_FACTORIES[exchange_name](config.detection)
     await adapter.run(
         runtime,
-        blacklist=config.blacklist,
+        blacklist=controls.combined_blacklist(),
         symbol_limit=symbol_limit,
         stop_after_snapshots=max_snapshots,
     )
@@ -268,12 +334,13 @@ async def _run_supervised_exchange(
     config,
     exchange_name: str,
     *,
+    controls: RuntimeControlStore,
     symbol_limit: int | None,
     max_snapshots: int | None,
 ) -> bool:
     try:
         print(f"[supervisor] starting={exchange_name}", flush=True)
-        await _run_named_exchange(config, exchange_name, symbol_limit, max_snapshots)
+        await _run_named_exchange(config, exchange_name, symbol_limit, max_snapshots, controls)
     except Exception as error:
         print(f"[supervisor] exchange_failed={exchange_name} error={error}", flush=True)
         return False
@@ -298,6 +365,35 @@ def _enabled_exchange_names(
             continue
         selected.append(name)
     return selected
+
+
+def _build_runtime_controls(config) -> RuntimeControlStore:
+    return RuntimeControlStore(
+        path=config.control_state_path,
+        defaults=config.detection,
+        base_blacklist=config.blacklist,
+    )
+
+
+async def _run_with_optional_control_bot(
+    config,
+    controls: RuntimeControlStore,
+    main_coro,
+    *,
+    start_bot: bool,
+):
+    notifier = TelegramNotifier(config.telegram)
+    if not start_bot or not notifier.enabled:
+        return await main_coro
+
+    bot = TelegramControlBot(config.telegram, controls)
+    bot_task = asyncio.create_task(bot.run())
+    try:
+        return await main_coro
+    finally:
+        bot_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await bot_task
 
 
 async def _test_telegram(config_path: Path, text: str) -> int:
