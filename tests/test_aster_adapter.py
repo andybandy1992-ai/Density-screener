@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import unittest
 
 from density_screener.exchanges.base import OrderBookState
+from density_screener.exchanges.aster_futures import AsterFuturesAdapter
 
 
 class AsterAdapterTests(unittest.TestCase):
@@ -23,3 +24,9 @@ class AsterAdapterTests(unittest.TestCase):
         self.assertEqual(snapshot.best_bid, 72736.7)
         self.assertEqual(snapshot.best_ask, 72736.8)
         self.assertGreater(snapshot.bids[1].notional, 200000)
+
+    def test_stream_name_helpers_support_combined_streams(self) -> None:
+        stream = AsterFuturesAdapter._stream_name_for("BTCUSDT")
+
+        self.assertEqual(stream, "btcusdt@depth20@100ms")
+        self.assertEqual(AsterFuturesAdapter._symbol_from_stream_name(stream), "BTCUSDT")

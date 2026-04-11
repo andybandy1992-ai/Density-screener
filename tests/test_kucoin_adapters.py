@@ -51,6 +51,13 @@ class KuCoinAdapterTests(unittest.TestCase):
         self.assertEqual(snapshot.best_ask, 72778.5)
         self.assertGreater(snapshot.bids[0].notional, 30000)
 
+    def test_base_helper_retries_are_configurable(self) -> None:
+        spot_adapter = KuCoinSpotAdapter(make_detection_config(), bootstrap_retry_attempts=7)
+        futures_adapter = KuCoinFuturesAdapter(make_detection_config(), bootstrap_delay_seconds=0.5)
+
+        self.assertEqual(spot_adapter._bootstrap_retry_attempts, 7)
+        self.assertEqual(futures_adapter._bootstrap_delay_seconds, 0.5)
+
 
 if __name__ == "__main__":
     unittest.main()

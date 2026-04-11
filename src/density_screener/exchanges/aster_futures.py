@@ -86,6 +86,9 @@ class AsterFuturesAdapter(ExchangeAdapter):
         print(f"[aster] symbols={','.join(item.symbol for item in instruments[:5])}", flush=True)
 
         volume_references = await self._bootstrap_all_volumes(instruments)
+        instruments = [instrument for instrument in instruments if instrument.symbol in volume_references]
+        if not instruments:
+            raise RuntimeError("No Aster futures instruments left after volume bootstrap.")
         print(f"[aster] bootstrapped_volumes={len(volume_references)}", flush=True)
 
         batches = [
@@ -127,17 +130,20 @@ class AsterFuturesAdapter(ExchangeAdapter):
         *,
         stop_after_snapshots: int | None = None,
     ) -> None:
-        if len(instruments) != 1:
-            raise RuntimeError("Aster adapter currently runs one symbol per websocket stream.")
-        instrument = instruments[0]
-        state = OrderBookState(
-            exchange=self.name,
-            symbol=instrument.symbol,
-            market_type="futures",
-            tick_size=instrument.tick_size,
-        )
-        stream = f"{instrument.symbol.lower()}@depth20@100ms"
-        ws_url = f"{self.WS_BASE}/{stream}"
+        states = {
+            instrument.symbol: OrderBookState(
+                exchange=self.name,
+                symbol=instrument.symbol,
+                market_type="futures",
+                tick_size=instrument.tick_size,
+            )
+            for instrument in instruments
+        }
+        stream_names = [self._stream_name_for(instrument.symbol) for instrument in instruments]
+        if len(stream_names) == 1:
+            ws_url = f"{self.WS_BASE}/{stream_names[0]}"
+        else:
+            ws_url = f"{self.WS_BASE}/stream?streams={'/'.join(stream_names)}"
 
         async with aiohttp.ClientSession() as session:
             async with session.ws_connect(ws_url, heartbeat=None) as ws:
@@ -146,16 +152,31 @@ class AsterFuturesAdapter(ExchangeAdapter):
                         if message.type == aiohttp.WSMsgType.ERROR:
                             raise RuntimeError("Aster websocket error")
                         continue
-                    payload = message.json()
+                    wrapper = message.json()
+                    stream_name = wrapper.get("stream")
+                    payload = wrapper.get("data", wrapper)
+                    symbol = self._symbol_from_stream_name(stream_name or payload.get("s", ""))
+                    if symbol not in states:
+                        continue
                     bids = [(float(price), float(size)) for price, size in payload["b"]]
                     asks = [(float(price), float(size)) for price, size in payload["a"]]
-                    state.replace(bids, asks)
-                    snapshot = state.to_snapshot(datetime.now(timezone.utc))
+                    states[symbol].replace(bids, asks)
+                    snapshot = states[symbol].to_snapshot(datetime.now(timezone.utc))
                     if snapshot is None:
                         continue
-                    signals = await runtime.handle_snapshot(snapshot, volume_references[instrument.symbol])
+                    signals = await runtime.handle_snapshot(snapshot, volume_references[symbol])
                     if stop_after_snapshots is not None and runtime.stats.snapshots_processed >= stop_after_snapshots:
                         print(f"[aster] processed_snapshots={runtime.stats.snapshots_processed}", flush=True)
                         return
                     for signal in signals:
                         print(runtime.render_signal(signal), flush=True)
+
+    @staticmethod
+    def _stream_name_for(symbol: str) -> str:
+        return f"{symbol.lower()}@depth20@100ms"
+
+    @staticmethod
+    def _symbol_from_stream_name(stream_name: str) -> str:
+        if "@" in stream_name:
+            return stream_name.split("@", 1)[0].upper()
+        return stream_name.upper()

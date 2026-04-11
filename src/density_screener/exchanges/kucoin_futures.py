@@ -43,16 +43,24 @@ class KuCoinFuturesAdapter(KuCoinAdapterBase):
             instruments.append(instrument)
         return instruments
 
-    async def bootstrap_volume_reference(self, instrument: ExchangeInstrument) -> VolumeReference:
+    async def bootstrap_volume_reference(
+        self,
+        instrument: ExchangeInstrument,
+        *,
+        session: aiohttp.ClientSession | None = None,
+    ) -> VolumeReference:
         params = {
             "symbol": instrument.symbol,
             "granularity": "5",
         }
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"{self.REST_BASE}/api/v1/kline/query", params=params, timeout=20) as response:
-                response.raise_for_status()
-                payload = await response.json()
+        payload = await self._get_json(
+            f"{self.REST_BASE}/api/v1/kline/query",
+            params=params,
+            session=session,
+        )
         candles = payload["data"][-self._detection.rolling_candle_count :]
+        if not candles:
+            raise ValueError(f"No KuCoin futures candles for {instrument.symbol}")
         turnovers = [float(row[6]) for row in candles]
         average_turnover = sum(turnovers) / max(len(turnovers), 1)
         return VolumeReference(
