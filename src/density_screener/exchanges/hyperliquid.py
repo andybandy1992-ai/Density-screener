@@ -18,9 +18,18 @@ class HyperliquidAdapter(ExchangeAdapter):
     INFO_URL = "https://api.hyperliquid.xyz/info"
     WS_URL = "wss://api.hyperliquid.xyz/ws"
 
-    def __init__(self, detection: DetectionConfig, *, subscription_batch_size: int = 20) -> None:
+    def __init__(
+        self,
+        detection: DetectionConfig,
+        *,
+        subscription_batch_size: int = 20,
+        bootstrap_delay_seconds: float = 0.2,
+        bootstrap_retry_attempts: int = 5,
+    ) -> None:
         self._detection = detection
         self._subscription_batch_size = subscription_batch_size
+        self._bootstrap_delay_seconds = bootstrap_delay_seconds
+        self._bootstrap_retry_attempts = bootstrap_retry_attempts
 
     @property
     def name(self) -> str:
@@ -47,7 +56,12 @@ class HyperliquidAdapter(ExchangeAdapter):
             instruments.append(instrument)
         return instruments
 
-    async def bootstrap_volume_reference(self, instrument: ExchangeInstrument) -> VolumeReference:
+    async def bootstrap_volume_reference(
+        self,
+        instrument: ExchangeInstrument,
+        *,
+        session: aiohttp.ClientSession | None = None,
+    ) -> VolumeReference:
         end_ms = int(time.time() * 1000)
         start_ms = end_ms - self._detection.rolling_candle_count * 5 * 60 * 1000
         payload = await self._post_info(
@@ -59,15 +73,13 @@ class HyperliquidAdapter(ExchangeAdapter):
                     "startTime": start_ms,
                     "endTime": end_ms,
                 },
-            }
+            },
+            session=session,
         )
-        candles = payload[-self._detection.rolling_candle_count :]
-        notionals = [float(row["v"]) * float(row["c"]) for row in candles]
-        average_notional = sum(notionals) / max(len(notionals), 1)
-        return VolumeReference(
-            avg_candle_notional=average_notional,
-            candle_count=len(notionals),
+        return self._volume_reference_from_candles(
+            payload,
             interval=self._detection.candle_interval,
+            rolling_candle_count=self._detection.rolling_candle_count,
         )
 
     async def run(
@@ -88,6 +100,9 @@ class HyperliquidAdapter(ExchangeAdapter):
         print(f"[hyperliquid] symbols={','.join(item.symbol for item in instruments[:5])}", flush=True)
 
         volume_references = await self._bootstrap_all_volumes(instruments)
+        instruments = [instrument for instrument in instruments if instrument.symbol in volume_references]
+        if not instruments:
+            raise RuntimeError("No Hyperliquid instruments left after volume bootstrap.")
         print(f"[hyperliquid] bootstrapped_volumes={len(volume_references)}", flush=True)
 
         batches = [
@@ -111,14 +126,21 @@ class HyperliquidAdapter(ExchangeAdapter):
         self,
         instruments: list[ExchangeInstrument],
     ) -> dict[str, VolumeReference]:
-        semaphore = asyncio.Semaphore(8)
         references: dict[str, VolumeReference] = {}
-
-        async def load_one(instrument: ExchangeInstrument) -> None:
-            async with semaphore:
-                references[instrument.symbol] = await self.bootstrap_volume_reference(instrument)
-
-        await asyncio.gather(*(load_one(instrument) for instrument in instruments))
+        async with aiohttp.ClientSession() as session:
+            for index, instrument in enumerate(instruments):
+                if index:
+                    await asyncio.sleep(self._bootstrap_delay_seconds)
+                try:
+                    references[instrument.symbol] = await self.bootstrap_volume_reference(
+                        instrument,
+                        session=session,
+                    )
+                except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as error:
+                    print(
+                        f"[hyperliquid] skipped_volume symbol={instrument.symbol} reason={error}",
+                        flush=True,
+                    )
         return references
 
     async def _run_batch(
@@ -182,8 +204,41 @@ class HyperliquidAdapter(ExchangeAdapter):
                     for signal in signals:
                         print(runtime.render_signal(signal), flush=True)
 
-    async def _post_info(self, payload: dict) -> dict | list:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(self.INFO_URL, json=payload, timeout=20) as response:
-                response.raise_for_status()
-                return await response.json()
+    async def _post_info(
+        self,
+        payload: dict,
+        *,
+        session: aiohttp.ClientSession | None = None,
+    ) -> dict | list:
+        owns_session = session is None
+        client = session or aiohttp.ClientSession()
+        backoff_seconds = 1.0
+        try:
+            for attempt in range(1, self._bootstrap_retry_attempts + 1):
+                async with client.post(self.INFO_URL, json=payload, timeout=20) as response:
+                    if response.status == 429 and attempt < self._bootstrap_retry_attempts:
+                        await asyncio.sleep(backoff_seconds)
+                        backoff_seconds = min(backoff_seconds * 2, 8.0)
+                        continue
+                    response.raise_for_status()
+                    return await response.json()
+        finally:
+            if owns_session:
+                await client.close()
+        raise RuntimeError("Hyperliquid request retries exhausted.")
+
+    @staticmethod
+    def _volume_reference_from_candles(
+        payload: list[dict],
+        *,
+        interval: str,
+        rolling_candle_count: int,
+    ) -> VolumeReference:
+        candles = payload[-rolling_candle_count:]
+        notionals = [float(row["v"]) * float(row["c"]) for row in candles]
+        average_notional = sum(notionals) / max(len(notionals), 1)
+        return VolumeReference(
+            avg_candle_notional=average_notional,
+            candle_count=len(notionals),
+            interval=interval,
+        )

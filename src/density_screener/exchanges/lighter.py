@@ -23,9 +23,18 @@ class LighterAdapter(ExchangeAdapter):
     WS_URL = "wss://mainnet.zklighter.elliot.ai/stream?readonly=true"
     STABLE_QUOTES = {"USD", "USDC", "USDT", "FDUSD", "BUSD"}
 
-    def __init__(self, detection: DetectionConfig, *, subscription_batch_size: int = 10) -> None:
+    def __init__(
+        self,
+        detection: DetectionConfig,
+        *,
+        subscription_batch_size: int = 10,
+        bootstrap_delay_seconds: float = 0.2,
+        bootstrap_retry_attempts: int = 5,
+    ) -> None:
         self._detection = detection
         self._subscription_batch_size = subscription_batch_size
+        self._bootstrap_delay_seconds = bootstrap_delay_seconds
+        self._bootstrap_retry_attempts = bootstrap_retry_attempts
 
     @property
     def name(self) -> str:
@@ -69,7 +78,12 @@ class LighterAdapter(ExchangeAdapter):
             instruments.append(instrument)
         return instruments
 
-    async def bootstrap_volume_reference(self, instrument: ExchangeInstrument) -> VolumeReference:
+    async def bootstrap_volume_reference(
+        self,
+        instrument: ExchangeInstrument,
+        *,
+        session: aiohttp.ClientSession | None = None,
+    ) -> VolumeReference:
         market_id = int(instrument.metadata["market_id"])
         end_ms = int(time.time() * 1000)
         start_ms = end_ms - self._detection.rolling_candle_count * 5 * 60 * 1000
@@ -81,10 +95,11 @@ class LighterAdapter(ExchangeAdapter):
             "count_back": str(self._detection.rolling_candle_count),
             "set_timestamp_to_end": "true",
         }
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"{self.REST_BASE}/candles", params=params, timeout=20) as response:
-                response.raise_for_status()
-                payload = await response.json()
+        payload = await self._get_json(
+            "/candles",
+            params=params,
+            session=session,
+        )
 
         candles = payload["c"][-self._detection.rolling_candle_count :]
         average_notional = self._average_notional_from_candles(candles)
@@ -112,6 +127,9 @@ class LighterAdapter(ExchangeAdapter):
         print(f"[lighter] symbols={','.join(item.symbol for item in instruments[:5])}", flush=True)
 
         volume_references = await self._bootstrap_all_volumes(instruments)
+        instruments = [instrument for instrument in instruments if instrument.symbol in volume_references]
+        if not instruments:
+            raise RuntimeError("No Lighter instruments left after volume bootstrap.")
         print(f"[lighter] bootstrapped_volumes={len(volume_references)}", flush=True)
 
         batches = [
@@ -135,14 +153,21 @@ class LighterAdapter(ExchangeAdapter):
         self,
         instruments: list[ExchangeInstrument],
     ) -> dict[str, VolumeReference]:
-        semaphore = asyncio.Semaphore(8)
         references: dict[str, VolumeReference] = {}
-
-        async def load_one(instrument: ExchangeInstrument) -> None:
-            async with semaphore:
-                references[instrument.symbol] = await self.bootstrap_volume_reference(instrument)
-
-        await asyncio.gather(*(load_one(instrument) for instrument in instruments))
+        async with aiohttp.ClientSession() as session:
+            for index, instrument in enumerate(instruments):
+                if index:
+                    await asyncio.sleep(self._bootstrap_delay_seconds)
+                try:
+                    references[instrument.symbol] = await self.bootstrap_volume_reference(
+                        instrument,
+                        session=session,
+                    )
+                except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as error:
+                    print(
+                        f"[lighter] skipped_volume symbol={instrument.symbol} reason={error}",
+                        flush=True,
+                    )
         return references
 
     async def _run_batch(
@@ -289,3 +314,27 @@ class LighterAdapter(ExchangeAdapter):
             for candle in candles
         ]
         return sum(notionals) / len(notionals)
+
+    async def _get_json(
+        self,
+        path: str,
+        *,
+        params: dict[str, str],
+        session: aiohttp.ClientSession | None = None,
+    ) -> dict:
+        owns_session = session is None
+        client = session or aiohttp.ClientSession()
+        backoff_seconds = 1.0
+        try:
+            for attempt in range(1, self._bootstrap_retry_attempts + 1):
+                async with client.get(f"{self.REST_BASE}{path}", params=params, timeout=20) as response:
+                    if response.status == 429 and attempt < self._bootstrap_retry_attempts:
+                        await asyncio.sleep(backoff_seconds)
+                        backoff_seconds = min(backoff_seconds * 2, 8.0)
+                        continue
+                    response.raise_for_status()
+                    return await response.json()
+        finally:
+            if owns_session:
+                await client.close()
+        raise RuntimeError("Lighter request retries exhausted.")

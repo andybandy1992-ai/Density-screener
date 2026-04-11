@@ -64,14 +64,14 @@ class HTXSpotAdapter(ExchangeAdapter):
             async with session.get(f"{self.REST_BASE}/market/history/kline", params=params, timeout=20) as response:
                 response.raise_for_status()
                 payload = await response.json()
-        candles = payload["data"][: self._detection.rolling_candle_count]
-        turnovers = [float(row["vol"]) for row in candles]
-        average_turnover = sum(turnovers) / max(len(turnovers), 1)
-        return VolumeReference(
-            avg_candle_notional=average_turnover,
-            candle_count=len(turnovers),
+        reference = self._volume_reference_from_payload(
+            payload,
             interval=self._detection.candle_interval,
+            rolling_candle_count=self._detection.rolling_candle_count,
         )
+        if reference is None:
+            raise ValueError(f"No HTX candle data for {instrument.symbol}")
+        return reference
 
     async def run(
         self,
@@ -91,6 +91,9 @@ class HTXSpotAdapter(ExchangeAdapter):
         print(f"[htx] symbols={','.join(item.symbol for item in instruments[:5])}", flush=True)
 
         volume_references = await self._bootstrap_all_volumes(instruments)
+        instruments = [instrument for instrument in instruments if instrument.symbol in volume_references]
+        if not instruments:
+            raise RuntimeError("No HTX spot instruments left after volume bootstrap.")
         print(f"[htx] bootstrapped_volumes={len(volume_references)}", flush=True)
 
         batches = [
@@ -119,7 +122,13 @@ class HTXSpotAdapter(ExchangeAdapter):
 
         async def load_one(instrument: ExchangeInstrument) -> None:
             async with semaphore:
-                references[instrument.symbol] = await self.bootstrap_volume_reference(instrument)
+                try:
+                    references[instrument.symbol] = await self.bootstrap_volume_reference(instrument)
+                except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as error:
+                    print(
+                        f"[htx] skipped_volume symbol={instrument.symbol} reason={error}",
+                        flush=True,
+                    )
 
         await asyncio.gather(*(load_one(instrument) for instrument in instruments))
         return references
@@ -190,3 +199,24 @@ class HTXSpotAdapter(ExchangeAdapter):
     @staticmethod
     def _decode_binary_message(data: bytes) -> dict:
         return json.loads(gzip.decompress(data).decode("utf-8"))
+
+    @staticmethod
+    def _volume_reference_from_payload(
+        payload: dict,
+        *,
+        interval: str,
+        rolling_candle_count: int,
+    ) -> VolumeReference | None:
+        raw_candles = payload.get("data")
+        if not isinstance(raw_candles, list) or not raw_candles:
+            return None
+        candles = raw_candles[:rolling_candle_count]
+        turnovers = [float(row["vol"]) for row in candles if row.get("vol") is not None]
+        if not turnovers:
+            return None
+        average_turnover = sum(turnovers) / len(turnovers)
+        return VolumeReference(
+            avg_candle_notional=average_turnover,
+            candle_count=len(turnovers),
+            interval=interval,
+        )

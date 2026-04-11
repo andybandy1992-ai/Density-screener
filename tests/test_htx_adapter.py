@@ -34,3 +34,29 @@ class HTXAdapterTests(unittest.TestCase):
         decoded = HTXSpotAdapter._decode_binary_message(encoded)
 
         self.assertEqual(decoded["ping"], 123456)
+
+    def test_volume_reference_from_payload_returns_none_without_data(self) -> None:
+        reference = HTXSpotAdapter._volume_reference_from_payload(
+            {},
+            interval="5m",
+            rolling_candle_count=14,
+        )
+
+        self.assertIsNone(reference)
+
+    def test_volume_reference_from_payload_uses_turnover(self) -> None:
+        reference = HTXSpotAdapter._volume_reference_from_payload(
+            {
+                "data": [
+                    {"vol": "120000"},
+                    {"vol": "80000"},
+                ]
+            },
+            interval="5m",
+            rolling_candle_count=14,
+        )
+
+        self.assertIsNotNone(reference)
+        assert reference is not None
+        self.assertEqual(reference.avg_candle_notional, 100000.0)
+        self.assertEqual(reference.candle_count, 2)
