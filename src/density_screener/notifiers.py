@@ -17,13 +17,24 @@ class TelegramMessage:
 
 def format_signal(signal: DensitySignal) -> str:
     side = "BID" if signal.side == "bid" else "ASK"
+    mid_price = _coerce_float(signal.metadata.get("mid_price"))
+    distance_line = "Distance from current: n/a"
+    if mid_price and mid_price > 0:
+        distance_abs = abs(signal.price - mid_price)
+        distance_pct = (distance_abs / mid_price) * 100
+        relation = "below" if signal.price < mid_price else "above" if signal.price > mid_price else "at market"
+        distance_line = (
+            f"Distance from current: {distance_pct:.2f}% "
+            f"({distance_abs:,.8f}) {relation}"
+        )
     return (
-        f"{signal.exchange} | {signal.symbol} | {signal.market_type}\n"
+        f"Exchange: {signal.exchange}\n"
+        f"Instrument: {signal.symbol}\n"
+        f"Market: {signal.market_type}\n"
         f"Side: {side}\n"
         f"Price: {signal.price:.8f}\n"
-        f"Notional: {signal.notional:,.2f} USD\n"
-        f"Resting: {signal.resting_seconds:.1f}s\n"
-        f"Vs avg 14x5m: {signal.ratio_to_average:.2f}x"
+        f"{distance_line}\n"
+        f"Lifetime: {signal.resting_seconds:.1f}s"
     )
 
 
@@ -76,3 +87,12 @@ class TelegramNotifier:
             async with session.post(message.url, json=message.payload, timeout=10) as response:
                 response.raise_for_status()
                 return response.status == 200
+
+
+def _coerce_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

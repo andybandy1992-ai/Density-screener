@@ -35,6 +35,7 @@ class TelegramConfig:
     enabled: bool
     bot_token: str
     chat_id: str
+    control_user_ids: tuple[str, ...] = ()
 
 
 @dataclass(slots=True, frozen=True)
@@ -95,6 +96,10 @@ def load_config(path: str | Path) -> AppConfig:
         enabled=_parse_bool(env.get("TELEGRAM_ENABLED"), bool(telegram_raw.get("enabled", False))),
         bot_token=str(env.get("TELEGRAM_BOT_TOKEN", telegram_raw.get("bot_token", ""))),
         chat_id=str(env.get("TELEGRAM_CHAT_ID", telegram_raw.get("chat_id", ""))),
+        control_user_ids=_parse_control_user_ids(
+            env.get("TELEGRAM_CONTROL_USER_IDS"),
+            telegram_raw.get("control_user_ids", []),
+        ),
     )
 
     exchanges = {
@@ -179,3 +184,18 @@ def _parse_float(value: str | None, default: float) -> float:
         return float(value.strip())
     except ValueError:
         return default
+
+
+def _parse_control_user_ids(
+    raw_value: str | None,
+    default_values: Any,
+) -> tuple[str, ...]:
+    if raw_value is not None:
+        return tuple(
+            value.strip()
+            for value in raw_value.split(",")
+            if value.strip()
+        )
+    if isinstance(default_values, (list, tuple)):
+        return tuple(str(value).strip() for value in default_values if str(value).strip())
+    return ()

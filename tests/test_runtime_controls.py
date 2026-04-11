@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from contextlib import suppress
+import os
 from pathlib import Path
 import unittest
+from uuid import uuid4
 
 from density_screener.blacklist import BlacklistMatcher
 from density_screener.runtime_controls import RuntimeControlStore
@@ -27,10 +29,9 @@ def make_detection_config() -> DetectionConfig:
 
 class RuntimeControlStoreTests(unittest.TestCase):
     def test_defaults_and_blacklist_persist(self) -> None:
-        state_path = Path(__file__).resolve().parent.parent / "state" / "runtime_controls_test.json"
-        if state_path.exists():
-            with suppress(PermissionError):
-                state_path.unlink()
+        state_dir = Path(__file__).resolve().parent.parent / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        state_path = state_dir / f"runtime_controls_test_{os.getpid()}_{uuid4().hex}.json"
         try:
             store = RuntimeControlStore(
                 state_path,
@@ -59,10 +60,9 @@ class RuntimeControlStoreTests(unittest.TestCase):
                     state_path.unlink()
 
     def test_remove_blacklist_term_raises_when_missing(self) -> None:
-        state_path = Path(__file__).resolve().parent.parent / "state" / "runtime_controls_test_missing.json"
-        if state_path.exists():
-            with suppress(PermissionError):
-                state_path.unlink()
+        state_dir = Path(__file__).resolve().parent.parent / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        state_path = state_dir / f"runtime_controls_test_missing_{os.getpid()}_{uuid4().hex}.json"
         try:
             store = RuntimeControlStore(
                 state_path,

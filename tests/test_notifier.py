@@ -21,6 +21,7 @@ def make_signal() -> DensitySignal:
         resting_seconds=7.0,
         average_candle_notional=17874.33,
         detected_at=datetime(2026, 4, 11, 12, 0, 0, tzinfo=timezone.utc),
+        metadata={"mid_price": 105000.0},
     )
 
 
@@ -29,9 +30,11 @@ class NotifierTests(unittest.TestCase):
         text = format_signal(make_signal())
 
         self.assertIn("BTCUSDT", text)
+        self.assertIn("Exchange:", text)
+        self.assertIn("Instrument:", text)
         self.assertIn("Price:", text)
-        self.assertIn("Resting:", text)
-        self.assertIn("Vs avg 14x5m:", text)
+        self.assertIn("Distance from current:", text)
+        self.assertIn("Lifetime:", text)
 
     def test_build_message_uses_bot_api_shape(self) -> None:
         notifier = TelegramNotifier(

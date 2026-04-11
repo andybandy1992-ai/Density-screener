@@ -21,6 +21,7 @@ suppress_top_ticks = 0
 enabled = false
 bot_token = ""
 chat_id = ""
+control_user_ids = ["417736336"]
 
 [market]
 blacklist_file = "blacklist.txt"

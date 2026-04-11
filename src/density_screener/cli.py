@@ -9,6 +9,7 @@ from typing import Callable
 
 from density_screener.debug import run_debug_simulation
 from density_screener.detector import DensityDetector
+from density_screener.health import HealthMonitor
 from density_screener.exchanges.aster_futures import AsterFuturesAdapter
 from density_screener.exchanges.bitget_spot import BitgetSpotAdapter
 from density_screener.exchanges.hyperliquid import HyperliquidAdapter
@@ -21,7 +22,7 @@ from density_screener.notifiers import TelegramNotifier
 from density_screener.runtime import ScreenerRuntime
 from density_screener.runtime_controls import RuntimeControlStore
 from density_screener.settings import load_config
-from density_screener.telegram_control_bot import TelegramControlBot
+from density_screener.telegram_control_panel import TelegramControlBot
 
 
 AdapterFactory = Callable[[object], object]
@@ -118,6 +119,10 @@ def _doctor(config_path: Path) -> int:
     print(f"strict_mode={config.strict_mode}")
     print(f"control_state_file={config.control_state_file}")
     print(f"control_state_path={config.control_state_path}")
+    print(
+        "control_user_ids="
+        + (",".join(config.telegram.control_user_ids) if config.telegram.control_user_ids else "alert_chat_only")
+    )
     print(f"spot_min_notional_usd={controls.min_notional_for('spot'):.0f}")
     print(f"futures_min_notional_usd={controls.min_notional_for('futures'):.0f}")
     print(f"volume_multiplier={config.detection.volume_multiplier:.2f}")
@@ -152,10 +157,13 @@ async def _run_bybit_spot(config_path: Path, symbol_limit: int, max_snapshots: i
         return 1
     config = load_config(config_path)
     controls = _build_runtime_controls(config)
+    health = _build_health_monitor(config)
+    _register_exchange_health(config, health, "bybit_spot")
     await _run_with_optional_control_bot(
         config,
         controls,
-        _run_named_exchange(config, "bybit_spot", symbol_limit, max_snapshots, controls),
+        health,
+        _run_named_exchange(config, "bybit_spot", symbol_limit, max_snapshots, controls, health),
         start_bot=max_snapshots is None,
     )
     return 0
@@ -167,10 +175,13 @@ async def _run_bitget_spot(config_path: Path, symbol_limit: int, max_snapshots: 
         return 1
     config = load_config(config_path)
     controls = _build_runtime_controls(config)
+    health = _build_health_monitor(config)
+    _register_exchange_health(config, health, "bitget_spot")
     await _run_with_optional_control_bot(
         config,
         controls,
-        _run_named_exchange(config, "bitget_spot", symbol_limit, max_snapshots, controls),
+        health,
+        _run_named_exchange(config, "bitget_spot", symbol_limit, max_snapshots, controls, health),
         start_bot=max_snapshots is None,
     )
     return 0
@@ -182,10 +193,13 @@ async def _run_kucoin_spot(config_path: Path, symbol_limit: int, max_snapshots: 
         return 1
     config = load_config(config_path)
     controls = _build_runtime_controls(config)
+    health = _build_health_monitor(config)
+    _register_exchange_health(config, health, "kucoin_spot")
     await _run_with_optional_control_bot(
         config,
         controls,
-        _run_named_exchange(config, "kucoin_spot", symbol_limit, max_snapshots, controls),
+        health,
+        _run_named_exchange(config, "kucoin_spot", symbol_limit, max_snapshots, controls, health),
         start_bot=max_snapshots is None,
     )
     return 0
@@ -197,10 +211,13 @@ async def _run_kucoin_futures(config_path: Path, symbol_limit: int, max_snapshot
         return 1
     config = load_config(config_path)
     controls = _build_runtime_controls(config)
+    health = _build_health_monitor(config)
+    _register_exchange_health(config, health, "kucoin_futures")
     await _run_with_optional_control_bot(
         config,
         controls,
-        _run_named_exchange(config, "kucoin_futures", symbol_limit, max_snapshots, controls),
+        health,
+        _run_named_exchange(config, "kucoin_futures", symbol_limit, max_snapshots, controls, health),
         start_bot=max_snapshots is None,
     )
     return 0
@@ -212,10 +229,13 @@ async def _run_htx_spot(config_path: Path, symbol_limit: int, max_snapshots: int
         return 1
     config = load_config(config_path)
     controls = _build_runtime_controls(config)
+    health = _build_health_monitor(config)
+    _register_exchange_health(config, health, "htx")
     await _run_with_optional_control_bot(
         config,
         controls,
-        _run_named_exchange(config, "htx", symbol_limit, max_snapshots, controls),
+        health,
+        _run_named_exchange(config, "htx", symbol_limit, max_snapshots, controls, health),
         start_bot=max_snapshots is None,
     )
     return 0
@@ -227,10 +247,13 @@ async def _run_aster_futures(config_path: Path, symbol_limit: int, max_snapshots
         return 1
     config = load_config(config_path)
     controls = _build_runtime_controls(config)
+    health = _build_health_monitor(config)
+    _register_exchange_health(config, health, "aster")
     await _run_with_optional_control_bot(
         config,
         controls,
-        _run_named_exchange(config, "aster", symbol_limit, max_snapshots, controls),
+        health,
+        _run_named_exchange(config, "aster", symbol_limit, max_snapshots, controls, health),
         start_bot=max_snapshots is None,
     )
     return 0
@@ -242,10 +265,13 @@ async def _run_hyperliquid(config_path: Path, symbol_limit: int, max_snapshots: 
         return 1
     config = load_config(config_path)
     controls = _build_runtime_controls(config)
+    health = _build_health_monitor(config)
+    _register_exchange_health(config, health, "hyperliquid")
     await _run_with_optional_control_bot(
         config,
         controls,
-        _run_named_exchange(config, "hyperliquid", symbol_limit, max_snapshots, controls),
+        health,
+        _run_named_exchange(config, "hyperliquid", symbol_limit, max_snapshots, controls, health),
         start_bot=max_snapshots is None,
     )
     return 0
@@ -257,10 +283,13 @@ async def _run_lighter(config_path: Path, symbol_limit: int, max_snapshots: int 
         return 1
     config = load_config(config_path)
     controls = _build_runtime_controls(config)
+    health = _build_health_monitor(config)
+    _register_exchange_health(config, health, "lighter")
     await _run_with_optional_control_bot(
         config,
         controls,
-        _run_named_exchange(config, "lighter", symbol_limit, max_snapshots, controls),
+        health,
+        _run_named_exchange(config, "lighter", symbol_limit, max_snapshots, controls, health),
         start_bot=max_snapshots is None,
     )
     return 0
@@ -277,6 +306,7 @@ async def _run_enabled(
         return 1
     config = load_config(config_path)
     controls = _build_runtime_controls(config)
+    health = _build_health_monitor(config)
     requested = _parse_exchange_names(selected_exchanges)
     available = _enabled_exchange_names(config.exchanges, requested)
     unknown = requested - set(ADAPTER_FACTORIES) if requested else set()
@@ -287,6 +317,8 @@ async def _run_enabled(
         return 1
 
     print(f"[supervisor] exchanges={','.join(available)}", flush=True)
+    for exchange_name in available:
+        _register_exchange_health(config, health, exchange_name)
     async def runner() -> int:
         tasks = [
             asyncio.create_task(
@@ -294,6 +326,7 @@ async def _run_enabled(
                     config,
                     exchange_name,
                     controls=controls,
+                    health=health,
                     symbol_limit=symbol_limit,
                     max_snapshots=max_snapshots,
                 )
@@ -306,6 +339,7 @@ async def _run_enabled(
     return await _run_with_optional_control_bot(
         config,
         controls,
+        health,
         runner(),
         start_bot=max_snapshots is None,
     )
@@ -317,17 +351,30 @@ async def _run_named_exchange(
     symbol_limit: int | None,
     max_snapshots: int | None,
     controls: RuntimeControlStore,
+    health: HealthMonitor,
 ) -> None:
     detector = DensityDetector(config.detection, min_notional_provider=controls)
     notifier = TelegramNotifier(config.telegram)
-    runtime = ScreenerRuntime(detector, notifier if notifier.enabled else None, controls=controls)
-    adapter = ADAPTER_FACTORIES[exchange_name](config.detection)
-    await adapter.run(
-        runtime,
-        blacklist=controls.combined_blacklist(),
-        symbol_limit=symbol_limit,
-        stop_after_snapshots=max_snapshots,
+    runtime = ScreenerRuntime(
+        detector,
+        notifier if notifier.enabled else None,
+        controls=controls,
+        health=health,
+        exchange_name=exchange_name,
     )
+    adapter = ADAPTER_FACTORIES[exchange_name](config.detection)
+    market_type = config.exchanges.get(exchange_name).market_type if exchange_name in config.exchanges else ""
+    health.mark_starting(exchange_name, market_type=market_type)
+    try:
+        await adapter.run(
+            runtime,
+            blacklist=controls.combined_blacklist(),
+            symbol_limit=symbol_limit,
+            stop_after_snapshots=max_snapshots,
+        )
+    except Exception as error:
+        health.mark_failure(exchange_name, error, market_type=market_type)
+        raise
 
 
 async def _run_supervised_exchange(
@@ -335,12 +382,13 @@ async def _run_supervised_exchange(
     exchange_name: str,
     *,
     controls: RuntimeControlStore,
+    health: HealthMonitor,
     symbol_limit: int | None,
     max_snapshots: int | None,
 ) -> bool:
     try:
         print(f"[supervisor] starting={exchange_name}", flush=True)
-        await _run_named_exchange(config, exchange_name, symbol_limit, max_snapshots, controls)
+        await _run_named_exchange(config, exchange_name, symbol_limit, max_snapshots, controls, health)
     except Exception as error:
         print(f"[supervisor] exchange_failed={exchange_name} error={error}", flush=True)
         return False
@@ -375,9 +423,25 @@ def _build_runtime_controls(config) -> RuntimeControlStore:
     )
 
 
+def _build_health_monitor(config) -> HealthMonitor:
+    notifier = TelegramNotifier(config.telegram)
+    return HealthMonitor(
+        telegram_enabled=notifier.enabled,
+        control_bot_enabled=notifier.enabled,
+        control_user_ids=config.telegram.control_user_ids,
+        control_state_path=config.control_state_path,
+    )
+
+
+def _register_exchange_health(config, health: HealthMonitor, exchange_name: str) -> None:
+    market_type = config.exchanges.get(exchange_name).market_type if exchange_name in config.exchanges else ""
+    health.register_exchange(exchange_name, market_type)
+
+
 async def _run_with_optional_control_bot(
     config,
     controls: RuntimeControlStore,
+    health: HealthMonitor,
     main_coro,
     *,
     start_bot: bool,
@@ -386,7 +450,7 @@ async def _run_with_optional_control_bot(
     if not start_bot or not notifier.enabled:
         return await main_coro
 
-    bot = TelegramControlBot(config.telegram, controls)
+    bot = TelegramControlBot(config.telegram, controls, health_monitor=health)
     bot_task = asyncio.create_task(bot.run())
     try:
         return await main_coro

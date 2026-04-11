@@ -72,6 +72,22 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(config.detection.spot_min_notional_usd, 75000.0)
         self.assertEqual(config.detection.futures_min_notional_usd, 250000.0)
 
+    def test_env_overrides_control_user_ids(self) -> None:
+        path = (
+            Path(__file__).resolve().parent.parent
+            / "tests"
+            / "fixtures"
+            / "sample_app.toml"
+        )
+        old_control_users = os.environ.get("TELEGRAM_CONTROL_USER_IDS")
+        try:
+            os.environ["TELEGRAM_CONTROL_USER_IDS"] = "417736336,123456789"
+            config = load_config(path)
+        finally:
+            _restore_env("TELEGRAM_CONTROL_USER_IDS", old_control_users)
+
+        self.assertEqual(config.telegram.control_user_ids, ("417736336", "123456789"))
+
 
 def _restore_env(name: str, value: str | None) -> None:
     if value is None:

@@ -67,7 +67,9 @@ The `doctor` command prints the active values after all overrides are applied.
 
 ## Telegram control panel
 
-When the live service is running with Telegram enabled, open the bot panel by sending `/panel` in the configured Telegram group.
+When the live service is running with Telegram enabled, open the bot panel by sending `/panel` from an authorized Telegram chat or user.
+
+Alerts always go to `TELEGRAM_CHAT_ID`, while bot controls can be restricted to one or more personal Telegram users via `TELEGRAM_CONTROL_USER_IDS`.
 
 From the panel you can:
 
@@ -76,8 +78,20 @@ From the panel you can:
 - add a bot-managed blacklist rule;
 - remove a bot-managed blacklist rule;
 - view the current bot-managed blacklist.
+- request a `/health` report with system and exchange status.
 
 These controls are shared across all enabled exchanges and are persisted in the runtime state file.
+
+## Health checks
+
+Use `/health` in Telegram to get a live status report from the running process.
+
+The report includes:
+
+- service uptime;
+- Telegram alert/control status;
+- runtime state file path;
+- one line per exchange with status, snapshot count, signal count, and last snapshot age.
 
 ## Useful commands
 
