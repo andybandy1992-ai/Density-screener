@@ -1,0 +1,7 @@
+# One rule per line.
+# Bare entries work for both exact markets and base coins.
+# Examples:
+# BTC
+# symbol:BTCUSDT
+# pattern:*1000*
+

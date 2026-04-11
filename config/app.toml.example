@@ -1,0 +1,58 @@
+[app]
+timezone = "Europe/Kaliningrad"
+strict_mode = true
+
+[detection]
+volume_multiplier = 5.0
+rolling_candle_count = 14
+candle_interval = "5m"
+# Change these any time for global spot/futures filters.
+spot_min_notional_usd = 50000
+futures_min_notional_usd = 100000
+price_window_pct = 5.0
+min_lifetime_seconds = 5.0
+same_price_cooldown_seconds = 86400
+symmetry_notional_tolerance_pct = 20.0
+symmetry_distance_tolerance_pct = 15.0
+suppress_top_ticks = 0
+
+[telegram]
+enabled = false
+bot_token = ""
+chat_id = ""
+
+[market]
+blacklist_file = "blacklist.txt"
+global_blacklist = []
+
+[exchanges.bitget_spot]
+enabled = true
+market_type = "spot"
+
+[exchanges.bybit_spot]
+enabled = true
+market_type = "spot"
+
+[exchanges.kucoin_spot]
+enabled = true
+market_type = "spot"
+
+[exchanges.kucoin_futures]
+enabled = true
+market_type = "futures"
+
+[exchanges.hyperliquid]
+enabled = true
+market_type = "futures"
+
+[exchanges.aster]
+enabled = true
+market_type = "futures"
+
+[exchanges.lighter]
+enabled = true
+market_type = "mixed"
+
+[exchanges.htx]
+enabled = true
+market_type = "spot"

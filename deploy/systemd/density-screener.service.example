@@ -1,0 +1,19 @@
+[Unit]
+Description=Density Screener
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/density-screener
+Environment=PYTHONPATH=src
+EnvironmentFile=/opt/density-screener/.env
+ExecStart=/opt/density-screener/.venv/bin/python -m density_screener.cli --config config/app.toml run-enabled
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

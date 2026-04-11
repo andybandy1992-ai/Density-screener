@@ -1,0 +1,5 @@
+# One rule per line.
+# BTC blocks all BTC-based markets.
+# symbol:BTCUSDT blocks only the exact market.
+# pattern:*1000* blocks wildcard symbol groups.
+
