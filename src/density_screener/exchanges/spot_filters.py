@@ -22,4 +22,7 @@ EXCLUDED_SPOT_BASES = {
 def should_skip_spot_base(base_asset: str | None) -> bool:
     if not base_asset:
         return False
-    return base_asset.strip().upper() in EXCLUDED_SPOT_BASES
+    normalized = base_asset.strip().upper()
+    if normalized in EXCLUDED_SPOT_BASES:
+        return True
+    return normalized.startswith("USD") or normalized.endswith("USD")

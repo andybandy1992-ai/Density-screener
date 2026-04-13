@@ -10,6 +10,8 @@ class SpotFilterTests(unittest.TestCase):
         self.assertTrue(should_skip_spot_base("USDC"))
         self.assertTrue(should_skip_spot_base("pyusd"))
         self.assertTrue(should_skip_spot_base("DAI"))
+        self.assertTrue(should_skip_spot_base("USDY"))
+        self.assertTrue(should_skip_spot_base("RLUSD"))
 
     def test_regular_assets_are_not_skipped(self) -> None:
         self.assertFalse(should_skip_spot_base("BTC"))
