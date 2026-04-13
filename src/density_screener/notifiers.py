@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from html import escape
 from typing import Any
 
 import aiohttp
@@ -16,27 +17,17 @@ class TelegramMessage:
 
 
 def format_signal(signal: DensitySignal) -> str:
-    side = "BID" if signal.side == "bid" else "ASK"
-    mid_price = _coerce_float(signal.metadata.get("mid_price"))
-    distance_line = "Distance from current: n/a"
-    if mid_price and mid_price > 0:
-        distance_abs = abs(signal.price - mid_price)
-        distance_pct = (distance_abs / mid_price) * 100
-        relation = "below" if signal.price < mid_price else "above" if signal.price > mid_price else "at market"
-        distance_line = (
-            f"Distance from current: {distance_pct:.2f}% "
-            f"({distance_abs:,.8f}) {relation}"
-        )
+    summary = _build_signal_summary(signal)
     return (
-        f"Exchange: {signal.exchange}\n"
-        f"Instrument: {signal.symbol}\n"
-        f"Market: {signal.market_type}\n"
-        f"Side: {side}\n"
-        f"Price: {signal.price:.8f}\n"
-        f"Limit size: {signal.quantity:,.8f}\n"
-        f"Limit notional: {signal.notional:,.2f}\n"
-        f"{distance_line}\n"
-        f"Lifetime: {signal.resting_seconds:.1f}s"
+        "Density signal\n"
+        f"{summary['exchange']} | {summary['market']} | {summary['side']}\n\n"
+        f"Instrument: {summary['symbol']}\n"
+        f"Price: {summary['price']}\n"
+        f"Order value: {summary['order_value']}\n"
+        f"Distance: {summary['distance']}\n"
+        f"Lifetime: {summary['lifetime']}\n"
+        f"14x5m avg: {summary['average']}\n"
+        f"Above avg: {summary['ratio']}"
     )
 
 
@@ -52,19 +43,34 @@ class TelegramNotifier:
         return f"https://api.telegram.org/bot{self._config.bot_token}/{method}"
 
     def build_message(self, signal: DensitySignal) -> TelegramMessage:
-        return self.build_text_message(format_signal(signal))
+        summary = _build_signal_summary(signal)
+        text = (
+            "<b>Density Signal</b>\n"
+            f"<code>{escape(summary['exchange'])} | {escape(summary['market'])} | {escape(summary['side'])}</code>\n\n"
+            f"<b>Instrument</b>: <code>{escape(summary['symbol'])}</code>\n"
+            f"<b>Price</b>: <code>{escape(summary['price'])}</code>\n"
+            f"<b>Order value</b>: <code>{escape(summary['order_value'])}</code>\n"
+            f"<b>Distance</b>: <code>{escape(summary['distance'])}</code>\n"
+            f"<b>Lifetime</b>: <code>{escape(summary['lifetime'])}</code>\n\n"
+            f"<b>14x5m avg</b>: <code>{escape(summary['average'])}</code>\n"
+            f"<b>Above avg</b>: <code>{escape(summary['ratio'])}</code>"
+        )
+        return self.build_text_message(text, parse_mode="HTML")
 
     def build_text_message(
         self,
         text: str,
         *,
         reply_markup: dict[str, Any] | None = None,
+        parse_mode: str | None = None,
     ) -> TelegramMessage:
         payload: dict[str, Any] = {
             "chat_id": self._config.chat_id,
             "text": text,
             "disable_web_page_preview": True,
         }
+        if parse_mode is not None:
+            payload["parse_mode"] = parse_mode
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
         return TelegramMessage(
@@ -98,3 +104,25 @@ def _coerce_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _build_signal_summary(signal: DensitySignal) -> dict[str, str]:
+    side = "BID" if signal.side == "bid" else "ASK"
+    mid_price = _coerce_float(signal.metadata.get("mid_price"))
+    distance_line = "n/a"
+    if mid_price and mid_price > 0:
+        distance_pct = (abs(signal.price - mid_price) / mid_price) * 100
+        relation = "below market" if signal.price < mid_price else "above market" if signal.price > mid_price else "at market"
+        distance_line = f"{distance_pct:.2f}% {relation}"
+    return {
+        "exchange": signal.exchange,
+        "market": signal.market_type,
+        "side": side,
+        "symbol": signal.symbol,
+        "price": f"{signal.price:.8f}",
+        "order_value": f"${signal.notional:,.2f}",
+        "distance": distance_line,
+        "lifetime": f"{signal.resting_seconds:.1f}s",
+        "average": f"${signal.average_candle_notional:,.2f}",
+        "ratio": f"{signal.ratio_to_average:.2f}x",
+    }
