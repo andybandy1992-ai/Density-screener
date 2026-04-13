@@ -50,7 +50,13 @@ class ScreenerRuntime:
             )
         if self._notifier is not None:
             for signal in signals:
-                await self._notifier.send(signal)
+                try:
+                    await self._notifier.send(signal)
+                except Exception as error:
+                    print(
+                        f"[notifier] send_failed exchange={signal.exchange} symbol={signal.symbol} error={error}",
+                        flush=True,
+                    )
         return signals
 
     @staticmethod
