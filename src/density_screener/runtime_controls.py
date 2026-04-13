@@ -17,6 +17,8 @@ from density_screener.settings import DetectionConfig
 class RuntimeControlSnapshot:
     spot_min_notional_usd: float
     futures_min_notional_usd: float
+    spot_volume_multiplier: float
+    futures_volume_multiplier: float
     blacklist_terms: tuple[str, ...]
     dynamic_blacklist: BlacklistMatcher
     combined_blacklist: BlacklistMatcher
@@ -46,6 +48,11 @@ class RuntimeControlStore:
             return self._snapshot.spot_min_notional_usd
         return self._snapshot.futures_min_notional_usd
 
+    def volume_multiplier_for(self, market_type: MarketType) -> float:
+        if market_type == "spot":
+            return self._snapshot.spot_volume_multiplier
+        return self._snapshot.futures_volume_multiplier
+
     def matches_blacklist(self, symbol: str) -> bool:
         return self._snapshot.combined_blacklist.matches(symbol)
 
@@ -63,6 +70,18 @@ class RuntimeControlStore:
 
     def adjust_min_notional(self, market_type: MarketType, delta: float) -> RuntimeControlSnapshot:
         return self.set_min_notional(market_type, self.min_notional_for(market_type) + delta)
+
+    def set_volume_multiplier(self, market_type: MarketType, value: float) -> RuntimeControlSnapshot:
+        payload = self._to_payload()
+        normalized_value = max(0.0, float(value))
+        if market_type == "spot":
+            payload["spot_volume_multiplier"] = normalized_value
+        else:
+            payload["futures_volume_multiplier"] = normalized_value
+        return self._replace(payload)
+
+    def adjust_volume_multiplier(self, market_type: MarketType, delta: float) -> RuntimeControlSnapshot:
+        return self.set_volume_multiplier(market_type, self.volume_multiplier_for(market_type) + delta)
 
     def add_blacklist_term(self, raw_term: str) -> RuntimeControlSnapshot:
         normalized_term = normalize_blacklist_term(raw_term)
@@ -91,6 +110,8 @@ class RuntimeControlStore:
         payload = {
             "spot_min_notional_usd": float(self._defaults.spot_min_notional_usd),
             "futures_min_notional_usd": float(self._defaults.futures_min_notional_usd),
+            "spot_volume_multiplier": float(self._defaults.volume_multiplier),
+            "futures_volume_multiplier": float(self._defaults.volume_multiplier),
             "blacklist_terms": [],
         }
         if self._path.exists():
@@ -103,6 +124,12 @@ class RuntimeControlStore:
             )
             payload["futures_min_notional_usd"] = float(
                 loaded.get("futures_min_notional_usd", payload["futures_min_notional_usd"])
+            )
+            payload["spot_volume_multiplier"] = float(
+                loaded.get("spot_volume_multiplier", payload["spot_volume_multiplier"])
+            )
+            payload["futures_volume_multiplier"] = float(
+                loaded.get("futures_volume_multiplier", payload["futures_volume_multiplier"])
             )
             payload["blacklist_terms"] = [
                 normalized
@@ -119,6 +146,8 @@ class RuntimeControlStore:
                 {
                     "spot_min_notional_usd": snapshot.spot_min_notional_usd,
                     "futures_min_notional_usd": snapshot.futures_min_notional_usd,
+                    "spot_volume_multiplier": snapshot.spot_volume_multiplier,
+                    "futures_volume_multiplier": snapshot.futures_volume_multiplier,
                     "blacklist_terms": list(snapshot.blacklist_terms),
                 },
                 indent=2,
@@ -135,6 +164,8 @@ class RuntimeControlStore:
         return RuntimeControlSnapshot(
             spot_min_notional_usd=float(payload["spot_min_notional_usd"]),
             futures_min_notional_usd=float(payload["futures_min_notional_usd"]),
+            spot_volume_multiplier=float(payload["spot_volume_multiplier"]),
+            futures_volume_multiplier=float(payload["futures_volume_multiplier"]),
             blacklist_terms=blacklist_terms,
             dynamic_blacklist=dynamic_blacklist,
             combined_blacklist=merge_matchers(self._base_blacklist, dynamic_blacklist),
@@ -145,6 +176,8 @@ class RuntimeControlStore:
         return {
             "spot_min_notional_usd": float(snapshot.spot_min_notional_usd),
             "futures_min_notional_usd": float(snapshot.futures_min_notional_usd),
+            "spot_volume_multiplier": float(snapshot.spot_volume_multiplier),
+            "futures_volume_multiplier": float(snapshot.futures_volume_multiplier),
             "blacklist_terms": list(snapshot.blacklist_terms),
         }
 

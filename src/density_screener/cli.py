@@ -125,6 +125,8 @@ def _doctor(config_path: Path) -> int:
     )
     print(f"spot_min_notional_usd={controls.min_notional_for('spot'):.0f}")
     print(f"futures_min_notional_usd={controls.min_notional_for('futures'):.0f}")
+    print(f"spot_volume_multiplier={controls.volume_multiplier_for('spot'):.2f}")
+    print(f"futures_volume_multiplier={controls.volume_multiplier_for('futures'):.2f}")
     print(f"volume_multiplier={config.detection.volume_multiplier:.2f}")
     print(f"price_window_pct={config.detection.price_window_pct:.2f}")
     print(f"min_lifetime_seconds={config.detection.min_lifetime_seconds:.1f}")

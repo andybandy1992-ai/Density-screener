@@ -33,6 +33,8 @@ class NotifierTests(unittest.TestCase):
         self.assertIn("Exchange:", text)
         self.assertIn("Instrument:", text)
         self.assertIn("Price:", text)
+        self.assertIn("Limit size:", text)
+        self.assertIn("Limit notional:", text)
         self.assertIn("Distance from current:", text)
         self.assertIn("Lifetime:", text)
 

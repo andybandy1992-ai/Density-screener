@@ -29,6 +29,9 @@ class DetectionConfig:
             return self.spot_min_notional_usd
         return self.futures_min_notional_usd
 
+    def volume_multiplier_for(self, market_type: MarketType) -> float:
+        return self.volume_multiplier
+
 
 @dataclass(slots=True, frozen=True)
 class TelegramConfig:

@@ -33,6 +33,8 @@ def format_signal(signal: DensitySignal) -> str:
         f"Market: {signal.market_type}\n"
         f"Side: {side}\n"
         f"Price: {signal.price:.8f}\n"
+        f"Limit size: {signal.quantity:,.8f}\n"
+        f"Limit notional: {signal.notional:,.2f}\n"
         f"{distance_line}\n"
         f"Lifetime: {signal.resting_seconds:.1f}s"
     )

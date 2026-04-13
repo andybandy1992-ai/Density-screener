@@ -103,6 +103,21 @@ class TelegramControlBot:
             await self._send_panel(chat_id)
             return
 
+        if pending.kind == "set_multiplier":
+            value = self._parse_numeric_input(text)
+            if value is None:
+                await self._send_text(
+                    chat_id,
+                    "Reply with a multiplier value, for example: `4.5`.",
+                    parse_mode="Markdown",
+                )
+                return
+            snapshot = self._controls.set_volume_multiplier(pending.market_type, value)
+            self._pending_actions.pop(pending_key, None)
+            await self._send_text(chat_id, self._format_multiplier_confirmation(pending.market_type, snapshot))
+            await self._send_panel(chat_id)
+            return
+
         if pending.kind == "add_blacklist":
             try:
                 added_terms = []
@@ -177,6 +192,22 @@ class TelegramControlBot:
             await self._answer_callback_query(
                 query["id"],
                 self._format_threshold_confirmation(market_type, snapshot),
+            )
+            return
+
+        if data.startswith("multiplier:"):
+            _, market_type, action = data.split(":", 2)
+            if action == "custom":
+                self._pending_actions[pending_key] = PendingAction("set_multiplier", market_type)
+                await self._answer_callback_query(query["id"], "Reply with a new multiplier.")
+                await self._send_text(chat_id, self._format_multiplier_prompt(market_type))
+                return
+            delta = float(action)
+            snapshot = self._controls.adjust_volume_multiplier(market_type, delta)
+            await self._edit_panel(chat_id, message_id)
+            await self._answer_callback_query(
+                query["id"],
+                self._format_multiplier_confirmation(market_type, snapshot),
             )
             return
 
@@ -290,6 +321,18 @@ class TelegramControlBot:
                     {"text": "Futures custom", "callback_data": "threshold:futures:custom"},
                 ],
                 [
+                    {"text": "Spot x -1.0", "callback_data": "multiplier:spot:-1.0"},
+                    {"text": "Spot x +1.0", "callback_data": "multiplier:spot:1.0"},
+                ],
+                [
+                    {"text": "Futures x -1.0", "callback_data": "multiplier:futures:-1.0"},
+                    {"text": "Futures x +1.0", "callback_data": "multiplier:futures:1.0"},
+                ],
+                [
+                    {"text": "Spot mult custom", "callback_data": "multiplier:spot:custom"},
+                    {"text": "Futures mult custom", "callback_data": "multiplier:futures:custom"},
+                ],
+                [
                     {"text": "Add blacklist", "callback_data": "blacklist:add"},
                     {"text": "Remove blacklist", "callback_data": "blacklist:remove"},
                 ],
@@ -312,6 +355,8 @@ class TelegramControlBot:
             "Density Screener Controls\n"
             f"Spot min notional: {snapshot.spot_min_notional_usd:,.0f} USD\n"
             f"Futures min notional: {snapshot.futures_min_notional_usd:,.0f} USD\n"
+            f"Spot multiplier: {snapshot.spot_volume_multiplier:.2f}x\n"
+            f"Futures multiplier: {snapshot.futures_volume_multiplier:.2f}x\n"
             f"Bot blacklist rules: {len(snapshot.blacklist_terms)}\n"
             f"Preview: {rules_preview}\n\n"
             "Use buttons below to update global filters for all exchanges.\n"
@@ -331,6 +376,20 @@ class TelegramControlBot:
     def _format_threshold_prompt(market_type: str) -> str:
         label = "spot" if market_type == "spot" else "futures"
         return f"Reply with the new global {label} minimum threshold in USD.\nExample: `75000`"
+
+    @staticmethod
+    def _format_multiplier_confirmation(
+        market_type: str,
+        snapshot: RuntimeControlSnapshot,
+    ) -> str:
+        value = snapshot.spot_volume_multiplier if market_type == "spot" else snapshot.futures_volume_multiplier
+        label = "Spot" if market_type == "spot" else "Futures"
+        return f"{label} multiplier set to {value:.2f}x."
+
+    @staticmethod
+    def _format_multiplier_prompt(market_type: str) -> str:
+        label = "spot" if market_type == "spot" else "futures"
+        return f"Reply with the new global {label} multiplier.\nExample: `4.5`"
 
     @staticmethod
     def _format_blacklist(snapshot: RuntimeControlSnapshot) -> str:

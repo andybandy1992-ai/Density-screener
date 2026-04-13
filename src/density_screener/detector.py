@@ -33,7 +33,8 @@ class DensityDetector:
     ) -> list[DensitySignal]:
         current_time = now or snapshot.timestamp
         threshold = max(
-            volume_reference.avg_candle_notional * self._config.volume_multiplier,
+            volume_reference.avg_candle_notional
+            * self._min_notional_provider.volume_multiplier_for(snapshot.market_type),
             self._min_notional_provider.min_notional_for(snapshot.market_type),
         )
 
