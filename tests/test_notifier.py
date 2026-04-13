@@ -30,15 +30,13 @@ class NotifierTests(unittest.TestCase):
         text = format_signal(make_signal())
 
         self.assertIn("BTCUSDT", text)
-        self.assertIn("Density signal", text)
-        self.assertIn("Instrument:", text)
-        self.assertIn("Price:", text)
-        self.assertIn("Order value:", text)
+        self.assertIn("BTCUSDT — BUY (BID)", text)
+        self.assertIn("Цена:", text)
+        self.assertIn("Объем:", text)
         self.assertNotIn("Limit size:", text)
-        self.assertIn("Distance:", text)
-        self.assertIn("Lifetime:", text)
-        self.assertIn("14x5m avg:", text)
-        self.assertIn("Above avg:", text)
+        self.assertIn("Расстояние от спреда:", text)
+        self.assertIn("Время жизни:", text)
+        self.assertIn("Exchange:", text)
 
     def test_build_message_uses_bot_api_shape(self) -> None:
         notifier = TelegramNotifier(
@@ -51,7 +49,9 @@ class NotifierTests(unittest.TestCase):
         self.assertEqual(message.payload["chat_id"], "-100555")
         self.assertIn("BTCUSDT", message.payload["text"])
         self.assertEqual(message.payload["parse_mode"], "HTML")
-        self.assertIn("<b>Density Signal</b>", message.payload["text"])
+        self.assertIn("<b>BTCUSDT", message.payload["text"])
+        self.assertIn("<b>Цена:", message.payload["text"])
+        self.assertIn("<b>Объем:", message.payload["text"])
 
     def test_build_text_message_uses_same_transport(self) -> None:
         notifier = TelegramNotifier(

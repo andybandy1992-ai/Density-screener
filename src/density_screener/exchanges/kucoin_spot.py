@@ -5,6 +5,7 @@ import aiohttp
 from density_screener.blacklist import BlacklistMatcher
 from density_screener.exchanges.base import ExchangeInstrument
 from density_screener.exchanges.kucoin_base import KuCoinAdapterBase
+from density_screener.exchanges.spot_filters import should_skip_spot_base
 from density_screener.models import VolumeReference
 
 
@@ -29,6 +30,8 @@ class KuCoinSpotAdapter(KuCoinAdapterBase):
             if not item.get("enableTrading", False):
                 continue
             if item.get("quoteCurrency") not in self.STABLE_QUOTES:
+                continue
+            if should_skip_spot_base(item.get("baseCurrency")):
                 continue
             instrument = ExchangeInstrument(
                 exchange=self.name,

@@ -19,6 +19,11 @@ class EvaluatedLevel:
 
 
 class DensityDetector:
+    SPOT_LADDER_DISTANCE_PCT = 0.15
+    SPOT_LADDER_NOTIONAL_TOLERANCE_PCT = 35.0
+    SPOT_LADDER_MIN_LEVELS = 3
+    SPOT_LADDER_MIN_THRESHOLD_RATIO = 0.75
+
     def __init__(self, config: DetectionConfig, min_notional_provider: object | None = None) -> None:
         self._config = config
         self._min_notional_provider = min_notional_provider or config
@@ -125,6 +130,8 @@ class DensityDetector:
                     continue
                 if self._looks_symmetric(snapshot, side, level, threshold):
                     continue
+                if snapshot.market_type == "spot" and self._looks_laddered(snapshot, side, level, threshold):
+                    continue
                 ratio = level.notional / max(1.0, volume_reference.avg_candle_notional)
                 valid.append(
                     EvaluatedLevel(
@@ -157,6 +164,32 @@ class DensityDetector:
                 continue
             notional_delta = abs(opposite.notional - level.notional) / max(level.notional, 1.0)
             if notional_delta <= self._config.symmetry_notional_tolerance_pct / 100:
+                return True
+        return False
+
+    def _looks_laddered(
+        self,
+        snapshot: OrderBookSnapshot,
+        side: Side,
+        level: BookLevel,
+        threshold: float,
+    ) -> bool:
+        same_side_levels = snapshot.bids if side == "bid" else snapshot.asks
+        clustered_levels = 1
+
+        for other in same_side_levels:
+            if other.price == level.price:
+                continue
+            if other.notional < threshold * self.SPOT_LADDER_MIN_THRESHOLD_RATIO:
+                continue
+            price_distance_pct = abs(other.price - level.price) / max(level.price, 1e-12) * 100
+            if price_distance_pct > self.SPOT_LADDER_DISTANCE_PCT:
+                continue
+            notional_delta_pct = abs(other.notional - level.notional) / max(level.notional, 1.0) * 100
+            if notional_delta_pct > self.SPOT_LADDER_NOTIONAL_TOLERANCE_PCT:
+                continue
+            clustered_levels += 1
+            if clustered_levels >= self.SPOT_LADDER_MIN_LEVELS:
                 return True
         return False
 

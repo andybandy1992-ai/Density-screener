@@ -9,6 +9,7 @@ import aiohttp
 
 from density_screener.blacklist import BlacklistMatcher, ensure_blacklist_matcher
 from density_screener.exchanges.base import ExchangeAdapter, ExchangeInstrument, OrderBookState
+from density_screener.exchanges.spot_filters import should_skip_spot_base
 from density_screener.models import VolumeReference
 from density_screener.runtime import ScreenerRuntime
 from density_screener.settings import DetectionConfig
@@ -58,6 +59,8 @@ class LighterAdapter(ExchangeAdapter):
             raw_market_type = item.get("market_type", "")
             symbol = item["symbol"]
             if raw_market_type == "spot" and not self._is_supported_spot_symbol(symbol):
+                continue
+            if raw_market_type == "spot" and should_skip_spot_base(self._base_asset_from_symbol(symbol)):
                 continue
             if raw_market_type not in {"spot", "perp"}:
                 continue

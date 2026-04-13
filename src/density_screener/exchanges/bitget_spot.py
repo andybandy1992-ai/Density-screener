@@ -9,6 +9,7 @@ import aiohttp
 
 from density_screener.blacklist import BlacklistMatcher, ensure_blacklist_matcher
 from density_screener.exchanges.base import ExchangeAdapter, ExchangeInstrument, OrderBookState
+from density_screener.exchanges.spot_filters import should_skip_spot_base
 from density_screener.models import VolumeReference
 from density_screener.runtime import ScreenerRuntime
 from density_screener.settings import DetectionConfig
@@ -38,6 +39,8 @@ class BitgetSpotAdapter(ExchangeAdapter):
             if item.get("status") != "online":
                 continue
             if item.get("quoteCoin") not in self.STABLE_QUOTES:
+                continue
+            if should_skip_spot_base(item.get("baseCoin")):
                 continue
             instrument = ExchangeInstrument(
                 exchange=self.name,

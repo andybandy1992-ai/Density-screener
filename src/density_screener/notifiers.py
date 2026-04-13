@@ -19,15 +19,12 @@ class TelegramMessage:
 def format_signal(signal: DensitySignal) -> str:
     summary = _build_signal_summary(signal)
     return (
-        "Density signal\n"
-        f"{summary['exchange']} | {summary['market']} | {summary['side']}\n\n"
-        f"Instrument: {summary['symbol']}\n"
-        f"Price: {summary['price']}\n"
-        f"Order value: {summary['order_value']}\n"
-        f"Distance: {summary['distance']}\n"
-        f"Lifetime: {summary['lifetime']}\n"
-        f"14x5m avg: {summary['average']}\n"
-        f"Above avg: {summary['ratio']}"
+        f"{summary['headline']}\n"
+        f"Цена: {summary['price_line']}\n"
+        f"Объем: {summary['order_value']}\n"
+        f"Расстояние от спреда: {summary['distance']}\n"
+        f"Время жизни: {summary['lifetime']}\n"
+        f"Exchange: {summary['exchange_label']}"
     )
 
 
@@ -45,15 +42,12 @@ class TelegramNotifier:
     def build_message(self, signal: DensitySignal) -> TelegramMessage:
         summary = _build_signal_summary(signal)
         text = (
-            "<b>Density Signal</b>\n"
-            f"<code>{escape(summary['exchange'])} | {escape(summary['market'])} | {escape(summary['side'])}</code>\n\n"
-            f"<b>Instrument</b>: <code>{escape(summary['symbol'])}</code>\n"
-            f"<b>Price</b>: <code>{escape(summary['price'])}</code>\n"
-            f"<b>Order value</b>: <code>{escape(summary['order_value'])}</code>\n"
-            f"<b>Distance</b>: <code>{escape(summary['distance'])}</code>\n"
-            f"<b>Lifetime</b>: <code>{escape(summary['lifetime'])}</code>\n\n"
-            f"<b>14x5m avg</b>: <code>{escape(summary['average'])}</code>\n"
-            f"<b>Above avg</b>: <code>{escape(summary['ratio'])}</code>"
+            f"<b>{escape(summary['headline'])}</b>\n\n"
+            f"<b>Цена: {escape(summary['price_prefix'])}{escape(summary['price'])} {escape(summary['price_pct'])}</b>\n"
+            f"<b>Объем: {escape(summary['order_value'])}</b>\n"
+            f"Расстояние от спреда: <code>{escape(summary['distance'])}</code>\n"
+            f"Время жизни: <code>{escape(summary['lifetime'])}</code>\n"
+            f"Exchange: <code>{escape(summary['exchange_label'])}</code>"
         )
         return self.build_text_message(text, parse_mode="HTML")
 
@@ -107,22 +101,60 @@ def _coerce_float(value: Any) -> float | None:
 
 
 def _build_signal_summary(signal: DensitySignal) -> dict[str, str]:
-    side = "BID" if signal.side == "bid" else "ASK"
+    side = "BUY (BID)" if signal.side == "bid" else "SELL (ASK)"
     mid_price = _coerce_float(signal.metadata.get("mid_price"))
+    price_pct = ""
     distance_line = "n/a"
     if mid_price and mid_price > 0:
-        distance_pct = (abs(signal.price - mid_price) / mid_price) * 100
-        relation = "below market" if signal.price < mid_price else "above market" if signal.price > mid_price else "at market"
-        distance_line = f"{distance_pct:.2f}% {relation}"
+        price_delta = signal.price - mid_price
+        distance_pct = abs(price_delta) / mid_price * 100
+        signed_pct = f"{price_delta / mid_price * 100:+.2f}%"
+        direction = "↑" if price_delta > 0 else "↓" if price_delta < 0 else "→"
+        price_pct = f"({signed_pct})"
+        distance_line = f"{_format_signed_price(price_delta)} ({distance_pct:.2f}%) {direction}"
     return {
-        "exchange": signal.exchange,
-        "market": signal.market_type,
-        "side": side,
-        "symbol": signal.symbol,
-        "price": f"{signal.price:.8f}",
-        "order_value": f"${signal.notional:,.2f}",
+        "headline": f"{signal.symbol} — {side}",
+        "exchange_label": _human_exchange_label(signal.exchange, signal.market_type),
+        "price_prefix": "🟢 " if signal.side == "bid" else "🔴 ",
+        "price": _format_price_value(signal.price),
+        "price_line": f"{_format_price_value(signal.price)} {price_pct}".strip(),
+        "order_value": _format_dollar_value(signal.notional),
         "distance": distance_line,
-        "lifetime": f"{signal.resting_seconds:.1f}s",
-        "average": f"${signal.average_candle_notional:,.2f}",
-        "ratio": f"{signal.ratio_to_average:.2f}x",
+        "lifetime": f"{signal.resting_seconds:.1f} сек",
+        "price_pct": price_pct,
     }
+
+
+def _format_price_value(value: float) -> str:
+    text = f"{value:.8f}".rstrip("0").rstrip(".")
+    if "." not in text:
+        return text + ".0000"
+    whole, fractional = text.split(".", 1)
+    return f"{whole}.{fractional.ljust(4, '0')}"
+
+
+def _format_signed_price(value: float) -> str:
+    sign = "+" if value > 0 else "-" if value < 0 else " "
+    return f"{sign}{_format_price_value(abs(value))}" if sign.strip() else _format_price_value(0.0)
+
+
+def _format_dollar_value(value: float) -> str:
+    return "$" + f"{value:,.2f}".replace(",", " ")
+
+
+def _human_exchange_label(exchange: str, market_type: str) -> str:
+    exchange_names = {
+        "aster": "Aster",
+        "bitget_spot": "Bitget",
+        "bybit_spot": "Bybit",
+        "htx": "HTX",
+        "hyperliquid": "Hyperliquid",
+        "kucoin_futures": "KuCoin",
+        "kucoin_spot": "KuCoin",
+        "lighter": "Lighter",
+    }
+    market_names = {
+        "spot": "Spot",
+        "futures": "Futures",
+    }
+    return f"{exchange_names.get(exchange, exchange)} {market_names.get(market_type, market_type.title())}".strip()

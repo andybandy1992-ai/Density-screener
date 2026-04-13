@@ -127,6 +127,38 @@ class DensityDetectorTests(unittest.TestCase):
         self.assertEqual(len(signals), 1)
         self.assertEqual(signals[0].symbol, "BTCUSDT")
 
+    def test_laddered_spot_levels_are_filtered_as_mm_like(self) -> None:
+        detector = DensityDetector(make_config())
+        ref = VolumeReference(avg_candle_notional=20_000.0, candle_count=14, interval="5m")
+        started = datetime(2026, 4, 11, 12, 0, 0, tzinfo=timezone.utc)
+
+        bids = (
+            BookLevel(price=99.90, quantity=1200.0, notional=119_880.0),
+            BookLevel(price=99.82, quantity=1198.0, notional=119_584.36),
+            BookLevel(price=99.76, quantity=1201.0, notional=119_811.76),
+        )
+        asks = (
+            BookLevel(price=100.20, quantity=100.0, notional=10_020.0),
+        )
+
+        signals = []
+        for second in range(7):
+            now = started + timedelta(seconds=second)
+            snapshot = OrderBookSnapshot(
+                exchange="test",
+                symbol="LTCUSDT",
+                market_type="spot",
+                best_bid=100.0,
+                best_ask=100.1,
+                bids=bids,
+                asks=asks,
+                timestamp=now,
+                tick_size=0.01,
+            )
+            signals = detector.process(snapshot, ref, now)
+
+        self.assertEqual(signals, [])
+
 
 if __name__ == "__main__":
     unittest.main()
