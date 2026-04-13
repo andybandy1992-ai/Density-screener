@@ -24,10 +24,16 @@ def make_config() -> DetectionConfig:
     )
 
 
-def make_snapshot(now: datetime, *, bid_notional: float = 120_000.0, ask_notional: float = 10_000.0) -> OrderBookSnapshot:
+def make_snapshot(
+    now: datetime,
+    *,
+    symbol: str = "BTCUSDT",
+    bid_notional: float = 120_000.0,
+    ask_notional: float = 10_000.0,
+) -> OrderBookSnapshot:
     return OrderBookSnapshot(
         exchange="test",
-        symbol="BTCUSDT",
+        symbol=symbol,
         market_type="spot",
         best_bid=100.0,
         best_ask=100.1,
@@ -98,6 +104,28 @@ class DensityDetectorTests(unittest.TestCase):
             signals = detector.process(current_snapshot, ref, current)
 
         self.assertEqual(signals, [])
+
+    def test_other_symbols_do_not_clear_existing_candidates(self) -> None:
+        detector = DensityDetector(make_config())
+        ref = VolumeReference(avg_candle_notional=20_000.0, candle_count=14, interval="5m")
+        started = datetime(2026, 4, 11, 12, 0, 0, tzinfo=timezone.utc)
+
+        for second in range(5):
+            detector.process(make_snapshot(started + timedelta(seconds=second), symbol="BTCUSDT"), ref)
+            detector.process(
+                make_snapshot(
+                    started + timedelta(seconds=second, milliseconds=500),
+                    symbol="ETHUSDT",
+                    bid_notional=5_000.0,
+                    ask_notional=5_000.0,
+                ),
+                ref,
+            )
+
+        signals = detector.process(make_snapshot(started + timedelta(seconds=5), symbol="BTCUSDT"), ref)
+
+        self.assertEqual(len(signals), 1)
+        self.assertEqual(signals[0].symbol, "BTCUSDT")
 
 
 if __name__ == "__main__":

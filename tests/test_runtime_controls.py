@@ -77,6 +77,37 @@ class RuntimeControlStoreTests(unittest.TestCase):
                 with suppress(PermissionError):
                     state_path.unlink()
 
+    def test_legacy_comma_separated_blacklist_entries_are_split_on_load(self) -> None:
+        state_dir = Path(__file__).resolve().parent.parent / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        state_path = state_dir / f"runtime_controls_test_legacy_{os.getpid()}_{uuid4().hex}.json"
+        try:
+            state_path.write_text(
+                (
+                    "{\n"
+                    '  "spot_min_notional_usd": 50000,\n'
+                    '  "futures_min_notional_usd": 100000,\n'
+                    '  "blacklist_terms": ["BTC, ETH", "symbol:SOLUSDT"]\n'
+                    "}\n"
+                ),
+                encoding="utf-8",
+            )
+
+            store = RuntimeControlStore(
+                state_path,
+                make_detection_config(),
+                BlacklistMatcher.load(),
+            )
+
+            self.assertEqual(store.snapshot().blacklist_terms, ("BTC", "ETH", "symbol:SOLUSDT"))
+            self.assertTrue(store.matches_blacklist("BTCUSDT"))
+            self.assertTrue(store.matches_blacklist("ETHUSDT"))
+            self.assertTrue(store.matches_blacklist("SOLUSDT"))
+        finally:
+            if state_path.exists():
+                with suppress(PermissionError):
+                    state_path.unlink()
+
 
 if __name__ == "__main__":
     unittest.main()

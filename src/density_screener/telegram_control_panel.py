@@ -105,23 +105,41 @@ class TelegramControlBot:
 
         if pending.kind == "add_blacklist":
             try:
-                snapshot = self._controls.add_blacklist_term(text)
+                added_terms = []
+                for term in self._parse_blacklist_terms(text):
+                    snapshot = self._controls.add_blacklist_term(term)
+                    added_terms.append(term)
             except ValueError as error:
                 await self._send_text(chat_id, str(error))
                 return
+            if not added_terms:
+                await self._send_text(chat_id, "Reply with at least one blacklist rule.")
+                return
             self._pending_actions.pop(pending_key, None)
-            await self._send_text(chat_id, f"Rule added: {snapshot.blacklist_terms[-1]}")
+            if len(added_terms) == 1:
+                await self._send_text(chat_id, f"Rule added: {added_terms[0]}")
+            else:
+                await self._send_text(chat_id, "Rules added:\n" + "\n".join(f"- {term}" for term in added_terms))
             await self._send_panel(chat_id)
             return
 
         if pending.kind == "remove_blacklist":
             try:
-                self._controls.remove_blacklist_term(text)
+                removed_terms = []
+                for term in self._parse_blacklist_terms(text):
+                    self._controls.remove_blacklist_term(term)
+                    removed_terms.append(term)
             except ValueError as error:
                 await self._send_text(chat_id, str(error))
                 return
+            if not removed_terms:
+                await self._send_text(chat_id, "Reply with at least one blacklist rule.")
+                return
             self._pending_actions.pop(pending_key, None)
-            await self._send_text(chat_id, "Rule removed.")
+            if len(removed_terms) == 1:
+                await self._send_text(chat_id, f"Rule removed: {removed_terms[0]}")
+            else:
+                await self._send_text(chat_id, "Rules removed:\n" + "\n".join(f"- {term}" for term in removed_terms))
             await self._send_panel(chat_id)
 
     async def _handle_callback_query(self, query: dict[str, Any]) -> None:
@@ -329,6 +347,14 @@ class TelegramControlBot:
             return float(normalized)
         except ValueError:
             return None
+
+    @staticmethod
+    def _parse_blacklist_terms(text: str) -> tuple[str, ...]:
+        terms: list[str] = []
+        for line in text.replace("\r", "\n").splitlines():
+            parts = [part.strip() for part in line.split(",")]
+            terms.extend(part for part in parts if part)
+        return tuple(terms)
 
     def _is_authorized(self, chat_id: str, user_id: int) -> bool:
         if self._config.control_user_ids:

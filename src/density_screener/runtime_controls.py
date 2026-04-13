@@ -106,8 +106,8 @@ class RuntimeControlStore:
             )
             payload["blacklist_terms"] = [
                 normalized
-                for item in loaded.get("blacklist_terms", [])
-                if (normalized := normalize_blacklist_term(str(item))) is not None
+                for item in self._split_raw_blacklist_terms(loaded.get("blacklist_terms", []))
+                if (normalized := normalize_blacklist_term(item)) is not None
             ]
         return self._build_snapshot(payload)
 
@@ -147,3 +147,13 @@ class RuntimeControlStore:
             "futures_min_notional_usd": float(snapshot.futures_min_notional_usd),
             "blacklist_terms": list(snapshot.blacklist_terms),
         }
+
+    @staticmethod
+    def _split_raw_blacklist_terms(raw_terms: object) -> list[str]:
+        if not isinstance(raw_terms, list):
+            return []
+        terms: list[str] = []
+        for item in raw_terms:
+            for line in str(item).replace("\r", "\n").splitlines():
+                terms.extend(part.strip() for part in line.split(",") if part.strip())
+        return terms

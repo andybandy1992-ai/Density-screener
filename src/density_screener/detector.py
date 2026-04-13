@@ -92,7 +92,12 @@ class DensityDetector:
             self._alerted[key] = current_time
             self._candidates.pop(key, None)
 
-        stale = [key for key in self._candidates if key not in active_keys]
+        symbol_scope = (snapshot.exchange, snapshot.symbol)
+        stale = [
+            key
+            for key in self._candidates
+            if key[:2] == symbol_scope and key not in active_keys
+        ]
         for key in stale:
             self._candidates.pop(key, None)
 

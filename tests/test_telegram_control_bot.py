@@ -44,6 +44,12 @@ class TelegramControlBotTests(unittest.TestCase):
         self.assertEqual(TelegramControlBot._parse_numeric_input(" 125000 "), 125000.0)
         self.assertIsNone(TelegramControlBot._parse_numeric_input("abc"))
 
+    def test_blacklist_parser_splits_comma_and_newline_input(self) -> None:
+        self.assertEqual(
+            TelegramControlBot._parse_blacklist_terms("BTC, ETH\nsymbol:SOLUSDT"),
+            ("BTC", "ETH", "symbol:SOLUSDT"),
+        )
+
     def test_enabled_requires_token_and_chat(self) -> None:
         bot = TelegramControlBot(
             TelegramConfig(enabled=True, bot_token="token123", chat_id="-1001"),
