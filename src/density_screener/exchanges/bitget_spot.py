@@ -27,10 +27,12 @@ class BitgetSpotAdapter(ExchangeAdapter):
         *,
         subscription_batch_size: int = 40,
         connection_stagger_seconds: float = 0.15,
+        bootstrap_retry_attempts: int = 3,
     ) -> None:
         self._detection = detection
         self._subscription_batch_size = subscription_batch_size
         self._connection_stagger_seconds = connection_stagger_seconds
+        self._bootstrap_retry_attempts = bootstrap_retry_attempts
 
     @property
     def name(self) -> str:
@@ -64,16 +66,26 @@ class BitgetSpotAdapter(ExchangeAdapter):
             instruments.append(instrument)
         return instruments
 
-    async def bootstrap_volume_reference(self, instrument: ExchangeInstrument) -> VolumeReference:
+    async def bootstrap_volume_reference(
+        self,
+        instrument: ExchangeInstrument,
+        *,
+        session: aiohttp.ClientSession | None = None,
+    ) -> VolumeReference:
         params = {
             "symbol": instrument.symbol,
             "granularity": "5min",
             "limit": str(self._detection.rolling_candle_count),
         }
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"{self.REST_BASE}/api/v2/spot/market/candles", params=params, timeout=20) as response:
+        owns_session = session is None
+        client = session or aiohttp.ClientSession()
+        try:
+            async with client.get(f"{self.REST_BASE}/api/v2/spot/market/candles", params=params, timeout=20) as response:
                 response.raise_for_status()
                 payload = await response.json()
+        finally:
+            if owns_session:
+                await client.close()
         candles = payload["data"][: self._detection.rolling_candle_count]
         turnovers = [float(row[7] if len(row) > 7 else row[6]) for row in candles]
         average_turnover = sum(turnovers) / max(len(turnovers), 1)
@@ -101,6 +113,9 @@ class BitgetSpotAdapter(ExchangeAdapter):
         print(f"[bitget_spot] symbols={','.join(item.symbol for item in instruments[:5])}", flush=True)
 
         volume_references = await self._bootstrap_all_volumes(instruments)
+        instruments = [instrument for instrument in instruments if instrument.symbol in volume_references]
+        if not instruments:
+            raise RuntimeError("No Bitget spot instruments left after volume bootstrap.")
         print(f"[bitget_spot] bootstrapped_volumes={len(volume_references)}", flush=True)
         batches = [
             instruments[index : index + self._subscription_batch_size]
@@ -127,11 +142,29 @@ class BitgetSpotAdapter(ExchangeAdapter):
         semaphore = asyncio.Semaphore(8)
         references: dict[str, VolumeReference] = {}
 
-        async def load_one(instrument: ExchangeInstrument) -> None:
-            async with semaphore:
-                references[instrument.symbol] = await self.bootstrap_volume_reference(instrument)
+        async with aiohttp.ClientSession() as session:
+            async def load_one(instrument: ExchangeInstrument) -> None:
+                async with semaphore:
+                    backoff_seconds = 1.0
+                    for attempt in range(1, self._bootstrap_retry_attempts + 1):
+                        try:
+                            references[instrument.symbol] = await self.bootstrap_volume_reference(
+                                instrument,
+                                session=session,
+                            )
+                            return
+                        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as error:
+                            if attempt >= self._bootstrap_retry_attempts:
+                                reason = str(error) or error.__class__.__name__
+                                print(
+                                    f"[bitget_spot] skipped_volume symbol={instrument.symbol} reason={reason}",
+                                    flush=True,
+                                )
+                                return
+                            await asyncio.sleep(backoff_seconds)
+                            backoff_seconds = min(backoff_seconds * 2, 8.0)
 
-        await asyncio.gather(*(load_one(instrument) for instrument in instruments))
+            await asyncio.gather(*(load_one(instrument) for instrument in instruments))
         return references
 
     async def _run_batch(
