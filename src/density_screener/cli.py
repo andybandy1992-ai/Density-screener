@@ -9,7 +9,7 @@ from typing import Callable
 
 from density_screener.debug import run_debug_simulation
 from density_screener.detector import DensityDetector
-from density_screener.health import HealthMonitor
+from density_screener.health import HealthMonitor, describe_error
 from density_screener.exchanges.aster_futures import AsterFuturesAdapter
 from density_screener.exchanges.bitget_spot import BitgetSpotAdapter
 from density_screener.exchanges.hyperliquid import HyperliquidAdapter
@@ -393,7 +393,10 @@ async def _run_supervised_exchange(
         print(f"[supervisor] starting={exchange_name}", flush=True)
         await _run_named_exchange(config, exchange_name, symbol_limit, max_snapshots, controls, health)
     except Exception as error:
-        print(f"[supervisor] exchange_failed={exchange_name} error={error}", flush=True)
+        print(
+            f"[supervisor] exchange_failed={exchange_name} error={describe_error(error)}",
+            flush=True,
+        )
         return False
     return True
 

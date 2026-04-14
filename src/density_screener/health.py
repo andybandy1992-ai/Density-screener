@@ -68,7 +68,7 @@ class HealthMonitor:
         self.register_exchange(exchange_name, market_type)
         exchange = self._exchanges[exchange_name]
         exchange.status = "failed"
-        exchange.last_error = str(error)
+        exchange.last_error = describe_error(error)
 
     def format_report(self, now: datetime | None = None) -> str:
         current_time = now or datetime.now(timezone.utc)
@@ -123,3 +123,12 @@ def _format_age(started_at: datetime, now: datetime) -> str:
         return f"{hours}h {minutes}m"
     days, hours = divmod(hours, 24)
     return f"{days}d {hours}h"
+
+
+def describe_error(error: Exception | str) -> str:
+    if isinstance(error, str):
+        return error
+    message = str(error).strip()
+    if message:
+        return f"{error.__class__.__name__}: {message}"
+    return error.__class__.__name__

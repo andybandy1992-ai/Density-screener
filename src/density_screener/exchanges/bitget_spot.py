@@ -21,9 +21,16 @@ class BitgetSpotAdapter(ExchangeAdapter):
     STABLE_QUOTES = {"USDT", "USDC", "USD", "FDUSD", "BUSD"}
     ORDER_BOOK_CHANNEL = "books15"
 
-    def __init__(self, detection: DetectionConfig, *, subscription_batch_size: int = 40) -> None:
+    def __init__(
+        self,
+        detection: DetectionConfig,
+        *,
+        subscription_batch_size: int = 40,
+        connection_stagger_seconds: float = 0.15,
+    ) -> None:
         self._detection = detection
         self._subscription_batch_size = subscription_batch_size
+        self._connection_stagger_seconds = connection_stagger_seconds
 
     @property
     def name(self) -> str:
@@ -106,9 +113,10 @@ class BitgetSpotAdapter(ExchangeAdapter):
                     batch,
                     volume_references,
                     stop_after_snapshots=stop_after_snapshots,
+                    initial_delay_seconds=batch_index * self._connection_stagger_seconds,
                 )
             )
-            for batch in batches
+            for batch_index, batch in enumerate(batches)
         ]
         await asyncio.gather(*tasks)
 
@@ -133,16 +141,8 @@ class BitgetSpotAdapter(ExchangeAdapter):
         volume_references: dict[str, VolumeReference],
         *,
         stop_after_snapshots: int | None = None,
+        initial_delay_seconds: float = 0.0,
     ) -> None:
-        states = {
-            instrument.symbol: OrderBookState(
-                exchange=self.name,
-                symbol=instrument.symbol,
-                market_type="spot",
-                tick_size=instrument.tick_size,
-            )
-            for instrument in instruments
-        }
         subscribe_payload = {
             "op": "subscribe",
             "args": [
@@ -154,41 +154,71 @@ class BitgetSpotAdapter(ExchangeAdapter):
                 for instrument in instruments
             ],
         }
+        if initial_delay_seconds > 0:
+            await asyncio.sleep(initial_delay_seconds)
 
         async with aiohttp.ClientSession() as session:
-            async with session.ws_connect(self.WS_URL, heartbeat=25) as ws:
-                print(f"[bitget_spot] ws_connected batch={len(instruments)}", flush=True)
-                await ws.send_json(subscribe_payload)
-                async for message in ws:
-                    if message.type == aiohttp.WSMsgType.TEXT:
-                        if message.data == "pong":
-                            continue
-                        payload = message.json()
-                        if payload.get("event") == "subscribe":
-                            continue
-                        if payload.get("event") == "error":
-                            raise RuntimeError(f"Bitget subscription error: {payload}")
-                        if payload.get("op") == "pong":
-                            continue
-                        arg = payload.get("arg", {})
-                        if arg.get("channel") != self.ORDER_BOOK_CHANNEL:
-                            continue
-                        symbol = arg["instId"]
-                        data = payload["data"][0]
-                        bids = [(float(price), float(size)) for price, size in data.get("bids", [])]
-                        asks = [(float(price), float(size)) for price, size in data.get("asks", [])]
-                        states[symbol].replace(bids, asks)
-                        snapshot = states[symbol].to_snapshot(datetime.now(timezone.utc))
-                        if snapshot is None:
-                            continue
-                        signals = await runtime.handle_snapshot(snapshot, volume_references[symbol])
-                        if stop_after_snapshots is not None and runtime.stats.snapshots_processed >= stop_after_snapshots:
-                            print(
-                                f"[bitget_spot] processed_snapshots={runtime.stats.snapshots_processed}",
-                                flush=True,
-                            )
-                            return
-                        for signal in signals:
-                            print(runtime.render_signal(signal), flush=True)
-                    elif message.type == aiohttp.WSMsgType.ERROR:
-                        raise RuntimeError("Bitget websocket error")
+            while True:
+                states = {
+                    instrument.symbol: OrderBookState(
+                        exchange=self.name,
+                        symbol=instrument.symbol,
+                        market_type="spot",
+                        tick_size=instrument.tick_size,
+                    )
+                    for instrument in instruments
+                }
+                try:
+                    async with session.ws_connect(self.WS_URL, heartbeat=25) as ws:
+                        print(f"[bitget_spot] ws_connected batch={len(instruments)}", flush=True)
+                        await ws.send_json(subscribe_payload)
+                        async for message in ws:
+                            if message.type == aiohttp.WSMsgType.TEXT:
+                                if message.data == "pong":
+                                    continue
+                                payload = message.json()
+                                if payload.get("event") == "subscribe":
+                                    continue
+                                if payload.get("event") == "error":
+                                    raise RuntimeError(f"Bitget subscription error: {payload}")
+                                if payload.get("op") == "pong":
+                                    continue
+                                arg = payload.get("arg", {})
+                                if arg.get("channel") != self.ORDER_BOOK_CHANNEL:
+                                    continue
+                                symbol = arg.get("instId", "")
+                                if symbol not in states:
+                                    continue
+                                data_rows = payload.get("data", [])
+                                if not data_rows:
+                                    continue
+                                data = data_rows[0]
+                                bids = [(float(price), float(size)) for price, size in data.get("bids", [])]
+                                asks = [(float(price), float(size)) for price, size in data.get("asks", [])]
+                                states[symbol].replace(bids, asks)
+                                snapshot = states[symbol].to_snapshot(datetime.now(timezone.utc))
+                                if snapshot is None:
+                                    continue
+                                signals = await runtime.handle_snapshot(snapshot, volume_references[symbol])
+                                if (
+                                    stop_after_snapshots is not None
+                                    and runtime.stats.snapshots_processed >= stop_after_snapshots
+                                ):
+                                    print(
+                                        f"[bitget_spot] processed_snapshots={runtime.stats.snapshots_processed}",
+                                        flush=True,
+                                    )
+                                    return
+                                for signal in signals:
+                                    print(runtime.render_signal(signal), flush=True)
+                            elif message.type == aiohttp.WSMsgType.ERROR:
+                                raise RuntimeError("Bitget websocket error")
+
+                    raise RuntimeError("Bitget websocket closed unexpectedly")
+                except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as error:
+                    print(
+                        f"[bitget_spot] reconnecting_batch reason={error.__class__.__name__}: {error}",
+                        flush=True,
+                    )
+                    await asyncio.sleep(1)
+                    continue

@@ -15,7 +15,7 @@ from density_screener.settings import DetectionConfig
 
 class AsterFuturesAdapter(ExchangeAdapter):
     REST_BASE = "https://fapi.asterdex.com"
-    WS_BASE = "wss://fstream.asterdex.com/ws"
+    WS_ROOT = "wss://fstream.asterdex.com"
 
     def __init__(self, detection: DetectionConfig, *, subscription_batch_size: int = 10) -> None:
         self._detection = detection
@@ -140,40 +140,58 @@ class AsterFuturesAdapter(ExchangeAdapter):
             for instrument in instruments
         }
         stream_names = [self._stream_name_for(instrument.symbol) for instrument in instruments]
-        if len(stream_names) == 1:
-            ws_url = f"{self.WS_BASE}/{stream_names[0]}"
-        else:
-            ws_url = f"{self.WS_BASE}/stream?streams={'/'.join(stream_names)}"
+        ws_url = self._ws_url_for_streams(stream_names)
 
         async with aiohttp.ClientSession() as session:
-            async with session.ws_connect(ws_url, heartbeat=None) as ws:
-                async for message in ws:
-                    if message.type != aiohttp.WSMsgType.TEXT:
-                        if message.type == aiohttp.WSMsgType.ERROR:
-                            raise RuntimeError("Aster websocket error")
-                        continue
-                    wrapper = message.json()
-                    stream_name = wrapper.get("stream")
-                    payload = wrapper.get("data", wrapper)
-                    symbol = self._symbol_from_stream_name(stream_name or payload.get("s", ""))
-                    if symbol not in states:
-                        continue
-                    bids = [(float(price), float(size)) for price, size in payload["b"]]
-                    asks = [(float(price), float(size)) for price, size in payload["a"]]
-                    states[symbol].replace(bids, asks)
-                    snapshot = states[symbol].to_snapshot(datetime.now(timezone.utc))
-                    if snapshot is None:
-                        continue
-                    signals = await runtime.handle_snapshot(snapshot, volume_references[symbol])
-                    if stop_after_snapshots is not None and runtime.stats.snapshots_processed >= stop_after_snapshots:
-                        print(f"[aster] processed_snapshots={runtime.stats.snapshots_processed}", flush=True)
-                        return
-                    for signal in signals:
-                        print(runtime.render_signal(signal), flush=True)
+            while True:
+                try:
+                    async with session.ws_connect(ws_url, heartbeat=None) as ws:
+                        print(f"[aster] ws_connected batch={len(instruments)}", flush=True)
+                        async for message in ws:
+                            if message.type != aiohttp.WSMsgType.TEXT:
+                                if message.type == aiohttp.WSMsgType.ERROR:
+                                    raise RuntimeError("Aster websocket error")
+                                continue
+                            wrapper = message.json()
+                            stream_name = wrapper.get("stream")
+                            payload = wrapper.get("data", wrapper)
+                            symbol = self._symbol_from_stream_name(stream_name or payload.get("s", ""))
+                            if symbol not in states:
+                                continue
+                            bids = [(float(price), float(size)) for price, size in payload["b"]]
+                            asks = [(float(price), float(size)) for price, size in payload["a"]]
+                            states[symbol].replace(bids, asks)
+                            snapshot = states[symbol].to_snapshot(datetime.now(timezone.utc))
+                            if snapshot is None:
+                                continue
+                            signals = await runtime.handle_snapshot(snapshot, volume_references[symbol])
+                            if (
+                                stop_after_snapshots is not None
+                                and runtime.stats.snapshots_processed >= stop_after_snapshots
+                            ):
+                                print(f"[aster] processed_snapshots={runtime.stats.snapshots_processed}", flush=True)
+                                return
+                            for signal in signals:
+                                print(runtime.render_signal(signal), flush=True)
+
+                    raise RuntimeError("Aster websocket closed unexpectedly")
+                except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as error:
+                    print(
+                        f"[aster] reconnecting_batch reason={error.__class__.__name__}: {error}",
+                        flush=True,
+                    )
+                    await asyncio.sleep(1)
+                    continue
 
     @staticmethod
     def _stream_name_for(symbol: str) -> str:
         return f"{symbol.lower()}@depth20@100ms"
+
+    @classmethod
+    def _ws_url_for_streams(cls, stream_names: list[str]) -> str:
+        if len(stream_names) == 1:
+            return f"{cls.WS_ROOT}/ws/{stream_names[0]}"
+        return f"{cls.WS_ROOT}/stream?streams={'/'.join(stream_names)}"
 
     @staticmethod
     def _symbol_from_stream_name(stream_name: str) -> str:

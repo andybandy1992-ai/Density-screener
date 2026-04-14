@@ -32,6 +32,19 @@ class HealthMonitorTests(unittest.TestCase):
         self.assertIn("bitget_spot: RUNNING", report)
         self.assertIn("bybit_spot: FAILED", report)
 
+    def test_blank_exception_is_rendered_with_class_name(self) -> None:
+        monitor = HealthMonitor(
+            telegram_enabled=True,
+            control_bot_enabled=True,
+            control_user_ids=("417736336",),
+            control_state_path=Path("/tmp/runtime_controls.json"),
+        )
+
+        monitor.mark_failure("bitget_spot", TimeoutError(), market_type="spot")
+        report = monitor.format_report(now=datetime(2026, 4, 11, 12, 0, 10, tzinfo=timezone.utc))
+
+        self.assertIn("error=TimeoutError", report)
+
 
 if __name__ == "__main__":
     unittest.main()
