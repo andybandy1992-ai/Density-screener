@@ -44,6 +44,7 @@ class RuntimeControlStoreTests(unittest.TestCase):
             self.assertTrue(store.matches_blacklist("AAAUSDT"))
 
             store.set_min_notional("spot", 75_000.0)
+            store.set_exchange_min_notional("bitget_spot", 90_000.0)
             store.set_volume_multiplier("futures", 7.5)
             store.add_blacklist_term("BTC")
 
@@ -54,6 +55,7 @@ class RuntimeControlStoreTests(unittest.TestCase):
             )
 
             self.assertEqual(reloaded.min_notional_for("spot"), 75_000.0)
+            self.assertEqual(reloaded.min_notional_for_exchange("bitget_spot", "spot"), 90_000.0)
             self.assertEqual(reloaded.volume_multiplier_for("futures"), 7.5)
             self.assertTrue(reloaded.matches_blacklist("BTCUSDT"))
             self.assertEqual(reloaded.snapshot().blacklist_terms, ("BTC",))
@@ -92,6 +94,7 @@ class RuntimeControlStoreTests(unittest.TestCase):
                     '  "futures_min_notional_usd": 100000,\n'
                     '  "spot_volume_multiplier": 4.5,\n'
                     '  "futures_volume_multiplier": 6.0,\n'
+                    '  "exchange_min_notional_usd": {"lighter": 70000},\n'
                     '  "blacklist_terms": ["BTC, ETH", "symbol:SOLUSDT"]\n'
                     "}\n"
                 ),
@@ -107,6 +110,7 @@ class RuntimeControlStoreTests(unittest.TestCase):
             self.assertEqual(store.snapshot().blacklist_terms, ("BTC", "ETH", "symbol:SOLUSDT"))
             self.assertEqual(store.volume_multiplier_for("spot"), 4.5)
             self.assertEqual(store.volume_multiplier_for("futures"), 6.0)
+            self.assertEqual(store.min_notional_for_exchange("lighter", "futures"), 70_000.0)
             self.assertTrue(store.matches_blacklist("BTCUSDT"))
             self.assertTrue(store.matches_blacklist("ETHUSDT"))
             self.assertTrue(store.matches_blacklist("SOLUSDT"))

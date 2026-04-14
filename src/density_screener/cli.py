@@ -18,7 +18,7 @@ from density_screener.exchanges.lighter import LighterAdapter
 from density_screener.exchanges.bybit_spot import BybitSpotAdapter
 from density_screener.exchanges.kucoin_futures import KuCoinFuturesAdapter
 from density_screener.exchanges.kucoin_spot import KuCoinSpotAdapter
-from density_screener.notifiers import TelegramNotifier
+from density_screener.telegram_notifier import TelegramNotifier
 from density_screener.runtime import ScreenerRuntime
 from density_screener.runtime_controls import RuntimeControlStore
 from density_screener.settings import load_config
@@ -125,6 +125,7 @@ def _doctor(config_path: Path) -> int:
     )
     print(f"spot_min_notional_usd={controls.min_notional_for('spot'):.0f}")
     print(f"futures_min_notional_usd={controls.min_notional_for('futures'):.0f}")
+    print(f"exchange_min_overrides={len(controls.snapshot().exchange_min_notional_usd)}")
     print(f"spot_volume_multiplier={controls.volume_multiplier_for('spot'):.2f}")
     print(f"futures_volume_multiplier={controls.volume_multiplier_for('futures'):.2f}")
     print(f"volume_multiplier={config.detection.volume_multiplier:.2f}")
@@ -452,7 +453,16 @@ async def _run_with_optional_control_bot(
     if not start_bot or not notifier.enabled:
         return await main_coro
 
-    bot = TelegramControlBot(config.telegram, controls, health_monitor=health)
+    bot = TelegramControlBot(
+        config.telegram,
+        controls,
+        health_monitor=health,
+        exchange_markets={
+            name: payload.market_type
+            for name, payload in config.exchanges.items()
+            if payload.enabled and name in ADAPTER_FACTORIES
+        },
+    )
     bot_task = asyncio.create_task(bot.run())
     try:
         return await main_coro

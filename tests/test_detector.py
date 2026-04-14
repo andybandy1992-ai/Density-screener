@@ -49,6 +49,29 @@ def make_snapshot(
 
 
 class DensityDetectorTests(unittest.TestCase):
+    def test_exchange_override_threshold_is_used_when_available(self) -> None:
+        class OverrideProvider:
+            def min_notional_for(self, market_type: str) -> float:
+                return 50_000.0
+
+            def min_notional_for_exchange(self, exchange: str, market_type: str) -> float:
+                self.requested = (exchange, market_type)
+                return 120_000.0
+
+            def volume_multiplier_for(self, market_type: str) -> float:
+                return 5.0
+
+        provider = OverrideProvider()
+        detector = DensityDetector(make_config(), min_notional_provider=provider)
+        ref = VolumeReference(avg_candle_notional=10_000.0, candle_count=14, interval="5m")
+        now = datetime(2026, 4, 11, 12, 0, 0, tzinfo=timezone.utc)
+        snapshot = make_snapshot(now, bid_notional=110_000.0, ask_notional=5_000.0)
+
+        signals = detector.process(snapshot, ref, now)
+
+        self.assertEqual(signals, [])
+        self.assertEqual(provider.requested, ("test", "spot"))
+
     def test_signal_appears_only_after_min_lifetime(self) -> None:
         detector = DensityDetector(make_config())
         ref = VolumeReference(avg_candle_notional=20_000.0, candle_count=14, interval="5m")

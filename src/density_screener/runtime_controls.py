@@ -19,6 +19,7 @@ class RuntimeControlSnapshot:
     futures_min_notional_usd: float
     spot_volume_multiplier: float
     futures_volume_multiplier: float
+    exchange_min_notional_usd: dict[str, float]
     blacklist_terms: tuple[str, ...]
     dynamic_blacklist: BlacklistMatcher
     combined_blacklist: BlacklistMatcher
@@ -48,10 +49,19 @@ class RuntimeControlStore:
             return self._snapshot.spot_min_notional_usd
         return self._snapshot.futures_min_notional_usd
 
+    def min_notional_for_exchange(self, exchange: str, market_type: MarketType) -> float:
+        normalized_exchange = self._normalize_exchange(exchange)
+        if normalized_exchange in self._snapshot.exchange_min_notional_usd:
+            return self._snapshot.exchange_min_notional_usd[normalized_exchange]
+        return self.min_notional_for(market_type)
+
     def volume_multiplier_for(self, market_type: MarketType) -> float:
         if market_type == "spot":
             return self._snapshot.spot_volume_multiplier
         return self._snapshot.futures_volume_multiplier
+
+    def exchange_min_notional(self, exchange: str) -> float | None:
+        return self._snapshot.exchange_min_notional_usd.get(self._normalize_exchange(exchange))
 
     def matches_blacklist(self, symbol: str) -> bool:
         return self._snapshot.combined_blacklist.matches(symbol)
@@ -70,6 +80,22 @@ class RuntimeControlStore:
 
     def adjust_min_notional(self, market_type: MarketType, delta: float) -> RuntimeControlSnapshot:
         return self.set_min_notional(market_type, self.min_notional_for(market_type) + delta)
+
+    def set_exchange_min_notional(self, exchange: str, value: float) -> RuntimeControlSnapshot:
+        payload = self._to_payload()
+        payload["exchange_min_notional_usd"][self._normalize_exchange(exchange)] = max(0.0, float(value))
+        return self._replace(payload)
+
+    def adjust_exchange_min_notional(self, exchange: str, delta: float) -> RuntimeControlSnapshot:
+        current = self.exchange_min_notional(exchange) or 0.0
+        return self.set_exchange_min_notional(exchange, current + delta)
+
+    def clear_exchange_min_notional(self, exchange: str) -> RuntimeControlSnapshot:
+        payload = self._to_payload()
+        removed = payload["exchange_min_notional_usd"].pop(self._normalize_exchange(exchange), None)
+        if removed is None:
+            raise ValueError("Exchange override is not set.")
+        return self._replace(payload)
 
     def set_volume_multiplier(self, market_type: MarketType, value: float) -> RuntimeControlSnapshot:
         payload = self._to_payload()
@@ -112,6 +138,7 @@ class RuntimeControlStore:
             "futures_min_notional_usd": float(self._defaults.futures_min_notional_usd),
             "spot_volume_multiplier": float(self._defaults.volume_multiplier),
             "futures_volume_multiplier": float(self._defaults.volume_multiplier),
+            "exchange_min_notional_usd": {},
             "blacklist_terms": [],
         }
         if self._path.exists():
@@ -131,6 +158,13 @@ class RuntimeControlStore:
             payload["futures_volume_multiplier"] = float(
                 loaded.get("futures_volume_multiplier", payload["futures_volume_multiplier"])
             )
+            raw_exchange_overrides = loaded.get("exchange_min_notional_usd", {})
+            if isinstance(raw_exchange_overrides, dict):
+                payload["exchange_min_notional_usd"] = {
+                    self._normalize_exchange(exchange): max(0.0, float(value))
+                    for exchange, value in raw_exchange_overrides.items()
+                    if str(exchange).strip()
+                }
             payload["blacklist_terms"] = [
                 normalized
                 for item in self._split_raw_blacklist_terms(loaded.get("blacklist_terms", []))
@@ -138,7 +172,7 @@ class RuntimeControlStore:
             ]
         return self._build_snapshot(payload)
 
-    def _replace(self, payload: dict[str, float | list[str]]) -> RuntimeControlSnapshot:
+    def _replace(self, payload: dict[str, float | list[str] | dict[str, float]]) -> RuntimeControlSnapshot:
         snapshot = self._build_snapshot(payload)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._path.write_text(
@@ -148,6 +182,7 @@ class RuntimeControlStore:
                     "futures_min_notional_usd": snapshot.futures_min_notional_usd,
                     "spot_volume_multiplier": snapshot.spot_volume_multiplier,
                     "futures_volume_multiplier": snapshot.futures_volume_multiplier,
+                    "exchange_min_notional_usd": snapshot.exchange_min_notional_usd,
                     "blacklist_terms": list(snapshot.blacklist_terms),
                 },
                 indent=2,
@@ -158,26 +193,32 @@ class RuntimeControlStore:
         self._snapshot = snapshot
         return snapshot
 
-    def _build_snapshot(self, payload: dict[str, float | list[str]]) -> RuntimeControlSnapshot:
+    def _build_snapshot(self, payload: dict[str, float | list[str] | dict[str, float]]) -> RuntimeControlSnapshot:
         blacklist_terms = tuple(str(term) for term in payload["blacklist_terms"])
         dynamic_blacklist = BlacklistMatcher.load(inline_terms=blacklist_terms)
+        exchange_min_notional_usd = {
+            self._normalize_exchange(exchange): float(value)
+            for exchange, value in dict(payload["exchange_min_notional_usd"]).items()
+        }
         return RuntimeControlSnapshot(
             spot_min_notional_usd=float(payload["spot_min_notional_usd"]),
             futures_min_notional_usd=float(payload["futures_min_notional_usd"]),
             spot_volume_multiplier=float(payload["spot_volume_multiplier"]),
             futures_volume_multiplier=float(payload["futures_volume_multiplier"]),
+            exchange_min_notional_usd=dict(sorted(exchange_min_notional_usd.items())),
             blacklist_terms=blacklist_terms,
             dynamic_blacklist=dynamic_blacklist,
             combined_blacklist=merge_matchers(self._base_blacklist, dynamic_blacklist),
         )
 
-    def _to_payload(self) -> dict[str, float | list[str]]:
+    def _to_payload(self) -> dict[str, float | list[str] | dict[str, float]]:
         snapshot = self._snapshot
         return {
             "spot_min_notional_usd": float(snapshot.spot_min_notional_usd),
             "futures_min_notional_usd": float(snapshot.futures_min_notional_usd),
             "spot_volume_multiplier": float(snapshot.spot_volume_multiplier),
             "futures_volume_multiplier": float(snapshot.futures_volume_multiplier),
+            "exchange_min_notional_usd": dict(snapshot.exchange_min_notional_usd),
             "blacklist_terms": list(snapshot.blacklist_terms),
         }
 
@@ -190,3 +231,7 @@ class RuntimeControlStore:
             for line in str(item).replace("\r", "\n").splitlines():
                 terms.extend(part.strip() for part in line.split(",") if part.strip())
         return terms
+
+    @staticmethod
+    def _normalize_exchange(exchange: str) -> str:
+        return exchange.strip().lower()

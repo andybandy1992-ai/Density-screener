@@ -17,7 +17,7 @@
 5. Edit `config/app.toml`.
 6. Edit `config/blacklist.txt` with markets or coins you want to skip.
 7. Set `TELEGRAM_CONTROL_USER_IDS` in `.env` if you want alerts to go to the group but controls to stay on your personal Telegram user.
-8. Use `/panel` in Telegram after startup if you want to change global thresholds or the bot-managed blacklist without touching files.
+8. Use `/panel` in Telegram after startup if you want to change global thresholds, per-exchange minimum overrides, or the bot-managed blacklist without touching files.
 9. Use `/health` in Telegram to get one status message for the whole service and every enabled exchange.
 
 ## Changing thresholds later

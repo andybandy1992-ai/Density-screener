@@ -40,7 +40,7 @@ class DensityDetector:
         threshold = max(
             volume_reference.avg_candle_notional
             * self._min_notional_provider.volume_multiplier_for(snapshot.market_type),
-            self._min_notional_provider.min_notional_for(snapshot.market_type),
+            self._min_notional_for_snapshot(snapshot),
         )
 
         valid_levels = self._collect_levels(snapshot, threshold, volume_reference)
@@ -108,6 +108,12 @@ class DensityDetector:
             self._candidates.pop(key, None)
 
         return signals
+
+    def _min_notional_for_snapshot(self, snapshot: OrderBookSnapshot) -> float:
+        provider_method = getattr(self._min_notional_provider, "min_notional_for_exchange", None)
+        if callable(provider_method):
+            return float(provider_method(snapshot.exchange, snapshot.market_type))
+        return float(self._min_notional_provider.min_notional_for(snapshot.market_type))
 
     def _collect_levels(
         self,

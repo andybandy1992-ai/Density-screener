@@ -20,6 +20,7 @@ class TelegramControlBotTests(unittest.TestCase):
 
         self.assertIn("threshold:spot:10000", callback_actions)
         self.assertIn("threshold:futures:custom", callback_actions)
+        self.assertIn("panel:exchange-thresholds", callback_actions)
         self.assertIn("multiplier:spot:1.0", callback_actions)
         self.assertIn("multiplier:futures:custom", callback_actions)
         self.assertIn("blacklist:add", callback_actions)
@@ -31,6 +32,7 @@ class TelegramControlBotTests(unittest.TestCase):
             futures_min_notional_usd=125_000.0,
             spot_volume_multiplier=4.5,
             futures_volume_multiplier=6.0,
+            exchange_min_notional_usd={"bitget_spot": 75_000.0},
             blacklist_terms=("BTC", "symbol:ETHUSDT"),
             dynamic_blacklist=BlacklistMatcher.load(inline_terms=["BTC", "symbol:ETHUSDT"]),
             combined_blacklist=BlacklistMatcher.load(inline_terms=["BTC", "symbol:ETHUSDT"]),
@@ -42,6 +44,7 @@ class TelegramControlBotTests(unittest.TestCase):
         self.assertIn("125,000", text)
         self.assertIn("4.50x", text)
         self.assertIn("6.00x", text)
+        self.assertIn("75,000", text)
         self.assertIn("BTC", text)
         self.assertIn("/health", text)
 

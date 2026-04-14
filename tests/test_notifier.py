@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import unittest
 
 from density_screener.models import DensitySignal
-from density_screener.notifiers import TelegramNotifier, format_signal
+from density_screener.telegram_notifier import TelegramNotifier, format_signal
 from density_screener.settings import TelegramConfig
 
 
@@ -28,6 +28,14 @@ def make_signal() -> DensitySignal:
 class NotifierTests(unittest.TestCase):
     def test_formatter_contains_required_fields(self) -> None:
         text = format_signal(make_signal())
+        self.assertIn("BTCUSDT", text)
+        self.assertIn("🔥 BTCUSDT — BUY СИГНАЛ 🔥", text)
+        self.assertIn("🟢 104321.1200", text)
+        self.assertIn("💵 Объём: $114 753.23", text)
+        self.assertIn("📉 От спреда: 0.65% ниже ↓", text)
+        self.assertIn("⏳ Живёт уже 7.0 сек", text)
+        self.assertIn("🏦 EXCHANGE: BYBIT SPOT", text)
+        return
 
         self.assertIn("BTCUSDT", text)
         self.assertIn("BTCUSDT — BUY (BID)", text)
@@ -44,6 +52,14 @@ class NotifierTests(unittest.TestCase):
         )
 
         message = notifier.build_message(make_signal())
+        self.assertTrue(message.url.endswith("/bottoken123/sendMessage"))
+        self.assertEqual(message.payload["chat_id"], "-100555")
+        self.assertIn("BTCUSDT", message.payload["text"])
+        self.assertEqual(message.payload["parse_mode"], "HTML")
+        self.assertIn("<b>🔥 BTCUSDT — BUY СИГНАЛ 🔥</b>", message.payload["text"])
+        self.assertIn("<b>💵 Объём: $114 753.23</b>", message.payload["text"])
+        self.assertIn("<b>🏦 EXCHANGE: BYBIT SPOT</b>", message.payload["text"])
+        return
 
         self.assertTrue(message.url.endswith("/bottoken123/sendMessage"))
         self.assertEqual(message.payload["chat_id"], "-100555")

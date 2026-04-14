@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from density_screener.detector import DensityDetector
 from density_screener.health import HealthMonitor
 from density_screener.models import DensitySignal, OrderBookSnapshot, VolumeReference
-from density_screener.notifiers import TelegramNotifier, format_signal
+from density_screener.telegram_notifier import TelegramNotifier, format_signal
 from density_screener.runtime_controls import RuntimeControlStore
 
 

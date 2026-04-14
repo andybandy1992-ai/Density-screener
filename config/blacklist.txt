@@ -5,3 +5,54 @@
 # symbol:BTCUSDT
 # pattern:*1000*
 
+# Precious metals and metal-backed assets
+XAU
+XAG
+XAUT
+PAXG
+XPT
+XPD
+IAU
+SLV
+
+# U.S. stock / ETF tickers exposed on supported venues
+AAPL
+AAPLON
+AMZN
+AMZNON
+AMD
+AMDON
+BMNR
+BOTZ
+COIN
+CRCL
+GOOGL
+GOOGLON
+HOOD
+IAUON
+INTC
+ITOT
+ITOTON
+IVV
+IVVON
+IWM
+IWMON
+MAGS
+META
+METAON
+MSFT
+MSFTON
+MSTR
+NVDA
+NVDAON
+PLTR
+QQQ
+QQQON
+ROBO
+SLVON
+SNDK
+SPY
+SPYON
+TSLA
+TSLAON
+URA

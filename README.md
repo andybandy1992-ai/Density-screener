@@ -75,12 +75,13 @@ From the panel you can:
 
 - change the global spot minimum threshold;
 - change the global futures minimum threshold;
+- set a minimum threshold override for one specific exchange;
 - add a bot-managed blacklist rule;
 - remove a bot-managed blacklist rule;
 - view the current bot-managed blacklist.
 - request a `/health` report with system and exchange status.
 
-These controls are shared across all enabled exchanges and are persisted in the runtime state file.
+Global controls are shared across all enabled exchanges, while exchange-specific overrides are applied only to the chosen venue. Everything is persisted in the runtime state file.
 
 ## Health checks
 
@@ -123,6 +124,8 @@ Supported rule shapes:
 - `BTC` blocks the whole coin across markets where the base asset is BTC
 - `symbol:BTCUSDT` blocks only one exact market
 - `pattern:*1000*` blocks wildcard groups
+
+The default blacklist file already includes precious metals plus the currently exposed U.S. stock / ETF tickers that appear on the supported venues.
 
 ## Current live status
 
