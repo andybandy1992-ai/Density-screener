@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterable
 from datetime import datetime, timezone
+import math
 import time
 
 import aiohttp
@@ -17,6 +18,7 @@ from density_screener.settings import DetectionConfig
 class HyperliquidAdapter(ExchangeAdapter):
     INFO_URL = "https://api.hyperliquid.xyz/info"
     WS_URL = "wss://api.hyperliquid.xyz/ws"
+    AGGREGATION_DISTANCE_PCT = 0.02
 
     def __init__(
         self,
@@ -137,8 +139,9 @@ class HyperliquidAdapter(ExchangeAdapter):
                         session=session,
                     )
                 except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as error:
+                    reason = str(error) or error.__class__.__name__
                     print(
-                        f"[hyperliquid] skipped_volume symbol={instrument.symbol} reason={error}",
+                        f"[hyperliquid] skipped_volume symbol={instrument.symbol} reason={reason}",
                         flush=True,
                     )
         return references
@@ -151,58 +154,78 @@ class HyperliquidAdapter(ExchangeAdapter):
         *,
         stop_after_snapshots: int | None = None,
     ) -> None:
-        states = {
-            instrument.symbol: OrderBookState(
-                exchange=self.name,
-                symbol=instrument.symbol,
-                market_type="futures",
-                tick_size=None,
-            )
-            for instrument in instruments
-        }
         async with aiohttp.ClientSession() as session:
-            async with session.ws_connect(self.WS_URL, heartbeat=None) as ws:
-                for instrument in instruments:
-                    await ws.send_json(
-                        {
-                            "method": "subscribe",
-                            "subscription": {
-                                "type": "l2Book",
-                                "coin": instrument.symbol,
-                            },
-                        }
+            while True:
+                states = {
+                    instrument.symbol: OrderBookState(
+                        exchange=self.name,
+                        symbol=instrument.symbol,
+                        market_type="futures",
+                        tick_size=None,
                     )
+                    for instrument in instruments
+                }
+                try:
+                    async with session.ws_connect(self.WS_URL, heartbeat=None) as ws:
+                        print(f"[hyperliquid] ws_connected batch={len(instruments)}", flush=True)
+                        for instrument in instruments:
+                            await ws.send_json(
+                                {
+                                    "method": "subscribe",
+                                    "subscription": {
+                                        "type": "l2Book",
+                                        "coin": instrument.symbol,
+                                    },
+                                }
+                            )
 
-                async for message in ws:
-                    if message.type != aiohttp.WSMsgType.TEXT:
-                        if message.type == aiohttp.WSMsgType.ERROR:
-                            raise RuntimeError("Hyperliquid websocket error")
-                        continue
-                    payload = message.json()
-                    if payload.get("channel") == "subscriptionResponse":
-                        continue
-                    if payload.get("channel") != "l2Book":
-                        continue
+                        async for message in ws:
+                            if message.type != aiohttp.WSMsgType.TEXT:
+                                if message.type == aiohttp.WSMsgType.ERROR:
+                                    raise RuntimeError("Hyperliquid websocket error")
+                                continue
+                            payload = message.json()
+                            if payload.get("channel") == "subscriptionResponse":
+                                continue
+                            if payload.get("channel") != "l2Book":
+                                continue
 
-                    book = payload["data"]
-                    symbol = book["coin"]
-                    bid_levels = book["levels"][0]
-                    ask_levels = book["levels"][1]
-                    bids = [(float(level["px"]), float(level["sz"])) for level in bid_levels]
-                    asks = [(float(level["px"]), float(level["sz"])) for level in ask_levels]
-                    states[symbol].replace(bids, asks)
-                    snapshot = states[symbol].to_snapshot(datetime.now(timezone.utc))
-                    if snapshot is None:
-                        continue
-                    signals = await runtime.handle_snapshot(snapshot, volume_references[symbol])
-                    if stop_after_snapshots is not None and runtime.stats.snapshots_processed >= stop_after_snapshots:
-                        print(
-                            f"[hyperliquid] processed_snapshots={runtime.stats.snapshots_processed}",
-                            flush=True,
-                        )
-                        return
-                    for signal in signals:
-                        print(runtime.render_signal(signal), flush=True)
+                            book = payload["data"]
+                            symbol = book["coin"]
+                            bid_levels = book["levels"][0]
+                            ask_levels = book["levels"][1]
+                            raw_bids = [(float(level["px"]), float(level["sz"])) for level in bid_levels]
+                            raw_asks = [(float(level["px"]), float(level["sz"])) for level in ask_levels]
+                            if not raw_bids or not raw_asks:
+                                continue
+                            mid_price = (raw_bids[0][0] + raw_asks[0][0]) / 2
+                            bids = self._aggregate_levels(raw_bids, side="bid", mid_price=mid_price)
+                            asks = self._aggregate_levels(raw_asks, side="ask", mid_price=mid_price)
+                            states[symbol].replace(bids, asks)
+                            snapshot = states[symbol].to_snapshot(datetime.now(timezone.utc))
+                            if snapshot is None:
+                                continue
+                            signals = await runtime.handle_snapshot(snapshot, volume_references[symbol])
+                            if (
+                                stop_after_snapshots is not None
+                                and runtime.stats.snapshots_processed >= stop_after_snapshots
+                            ):
+                                print(
+                                    f"[hyperliquid] processed_snapshots={runtime.stats.snapshots_processed}",
+                                    flush=True,
+                                )
+                                return
+                            for signal in signals:
+                                print(runtime.render_signal(signal), flush=True)
+
+                    raise RuntimeError("Hyperliquid websocket closed unexpectedly")
+                except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as error:
+                    print(
+                        f"[hyperliquid] reconnecting_batch reason={error.__class__.__name__}: {error}",
+                        flush=True,
+                    )
+                    await asyncio.sleep(1)
+                    continue
 
     async def _post_info(
         self,
@@ -242,3 +265,46 @@ class HyperliquidAdapter(ExchangeAdapter):
             candle_count=len(notionals),
             interval=interval,
         )
+
+    @classmethod
+    def _aggregate_levels(
+        cls,
+        levels: list[tuple[float, float]],
+        *,
+        side: str,
+        mid_price: float,
+    ) -> list[tuple[float, float]]:
+        bucket_size = cls._nice_bucket_size(mid_price * cls.AGGREGATION_DISTANCE_PCT / 100)
+        buckets: dict[int, float] = {}
+        for price, quantity in levels:
+            bucket_id = math.floor(price / bucket_size)
+            buckets[bucket_id] = buckets.get(bucket_id, 0.0) + price * quantity
+
+        aggregated: list[tuple[float, float]] = []
+        for bucket_id, notional in buckets.items():
+            if side == "bid":
+                bucket_price = (bucket_id + 1) * bucket_size
+            else:
+                bucket_price = bucket_id * bucket_size
+            if bucket_price <= 0:
+                continue
+            aggregated.append((bucket_price, notional / bucket_price))
+
+        reverse = side == "bid"
+        return sorted(aggregated, key=lambda item: item[0], reverse=reverse)
+
+    @staticmethod
+    def _nice_bucket_size(raw_size: float) -> float:
+        if raw_size <= 0:
+            return 1e-12
+        magnitude = 10 ** math.floor(math.log10(raw_size))
+        normalized = raw_size / magnitude
+        if normalized <= 1:
+            nice = 1
+        elif normalized <= 2:
+            nice = 2
+        elif normalized <= 5:
+            nice = 5
+        else:
+            nice = 10
+        return nice * magnitude

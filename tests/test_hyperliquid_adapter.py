@@ -40,3 +40,20 @@ class HyperliquidAdapterTests(unittest.TestCase):
 
         self.assertEqual(reference.avg_candle_notional, 17500.0)
         self.assertEqual(reference.candle_count, 2)
+
+    def test_l2book_levels_are_aggregated_into_narrow_price_buckets(self) -> None:
+        levels = [
+            (2315.80, 600.0),
+            (2315.90, 700.0),
+            (2316.25, 10.0),
+        ]
+
+        aggregated = HyperliquidAdapter._aggregate_levels(
+            levels,
+            side="ask",
+            mid_price=2315.0,
+        )
+
+        self.assertLess(len(aggregated), len(levels))
+        self.assertAlmostEqual(aggregated[0][0], 2315.5)
+        self.assertGreater(aggregated[0][0] * aggregated[0][1], 3_000_000)

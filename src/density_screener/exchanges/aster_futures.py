@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import aiohttp
@@ -13,13 +14,28 @@ from density_screener.runtime import ScreenerRuntime
 from density_screener.settings import DetectionConfig
 
 
+@dataclass(slots=True, frozen=True)
+class _InitialOrderBook:
+    last_update_id: int
+    bids: list[tuple[float, float]]
+    asks: list[tuple[float, float]]
+
+
 class AsterFuturesAdapter(ExchangeAdapter):
     REST_BASE = "https://fapi.asterdex.com"
     WS_ROOT = "wss://fstream.asterdex.com"
+    DEPTH_LIMIT = 1000
 
-    def __init__(self, detection: DetectionConfig, *, subscription_batch_size: int = 10) -> None:
+    def __init__(
+        self,
+        detection: DetectionConfig,
+        *,
+        subscription_batch_size: int = 10,
+        depth_bootstrap_concurrency: int = 5,
+    ) -> None:
         self._detection = detection
         self._subscription_batch_size = subscription_batch_size
+        self._depth_bootstrap_concurrency = depth_bootstrap_concurrency
 
     @property
     def name(self) -> str:
@@ -91,6 +107,12 @@ class AsterFuturesAdapter(ExchangeAdapter):
             raise RuntimeError("No Aster futures instruments left after volume bootstrap.")
         print(f"[aster] bootstrapped_volumes={len(volume_references)}", flush=True)
 
+        initial_books = await self._bootstrap_all_order_books(instruments)
+        instruments = [instrument for instrument in instruments if instrument.symbol in initial_books]
+        if not instruments:
+            raise RuntimeError("No Aster futures instruments left after order book bootstrap.")
+        print(f"[aster] bootstrapped_books={len(initial_books)}", flush=True)
+
         batches = [
             instruments[index : index + self._subscription_batch_size]
             for index in range(0, len(instruments), self._subscription_batch_size)
@@ -101,6 +123,7 @@ class AsterFuturesAdapter(ExchangeAdapter):
                     runtime,
                     batch,
                     volume_references,
+                    initial_books,
                     stop_after_snapshots=stop_after_snapshots,
                 )
             )
@@ -122,28 +145,92 @@ class AsterFuturesAdapter(ExchangeAdapter):
         await asyncio.gather(*(load_one(instrument) for instrument in instruments))
         return references
 
+    async def _bootstrap_all_order_books(
+        self,
+        instruments: list[ExchangeInstrument],
+    ) -> dict[str, _InitialOrderBook]:
+        semaphore = asyncio.Semaphore(self._depth_bootstrap_concurrency)
+        books: dict[str, _InitialOrderBook] = {}
+
+        async with aiohttp.ClientSession() as session:
+            async def load_one(instrument: ExchangeInstrument) -> None:
+                async with semaphore:
+                    try:
+                        books[instrument.symbol] = await self._fetch_initial_order_book(
+                            instrument.symbol,
+                            session=session,
+                        )
+                    except (aiohttp.ClientError, asyncio.TimeoutError, KeyError, ValueError) as error:
+                        reason = str(error) or error.__class__.__name__
+                        print(
+                            f"[aster] skipped_book symbol={instrument.symbol} reason={reason}",
+                            flush=True,
+                        )
+
+            await asyncio.gather(*(load_one(instrument) for instrument in instruments))
+        return books
+
+    async def _fetch_initial_order_book(
+        self,
+        symbol: str,
+        *,
+        session: aiohttp.ClientSession,
+    ) -> _InitialOrderBook:
+        async with session.get(
+            f"{self.REST_BASE}/fapi/v1/depth",
+            params={"symbol": symbol, "limit": str(self.DEPTH_LIMIT)},
+            timeout=20,
+        ) as response:
+            response.raise_for_status()
+            payload = await response.json()
+        return _InitialOrderBook(
+            last_update_id=int(payload["lastUpdateId"]),
+            bids=[(float(price), float(size)) for price, size in payload.get("bids", [])],
+            asks=[(float(price), float(size)) for price, size in payload.get("asks", [])],
+        )
+
     async def _run_batch(
         self,
         runtime: ScreenerRuntime,
         instruments: list[ExchangeInstrument],
         volume_references: dict[str, VolumeReference],
+        initial_books: dict[str, _InitialOrderBook],
         *,
         stop_after_snapshots: int | None = None,
     ) -> None:
-        states = {
-            instrument.symbol: OrderBookState(
-                exchange=self.name,
-                symbol=instrument.symbol,
-                market_type="futures",
-                tick_size=instrument.tick_size,
-            )
-            for instrument in instruments
-        }
         stream_names = [self._stream_name_for(instrument.symbol) for instrument in instruments]
         ws_url = self._ws_url_for_streams(stream_names)
 
         async with aiohttp.ClientSession() as session:
+            first_connect = True
             while True:
+                if first_connect:
+                    batch_books = initial_books
+                    first_connect = False
+                else:
+                    batch_books = await self._bootstrap_all_order_books(instruments)
+                    if not batch_books:
+                        print("[aster] reconnecting_batch reason=no_order_books", flush=True)
+                        await asyncio.sleep(1)
+                        continue
+
+                states = {
+                    instrument.symbol: OrderBookState(
+                        exchange=self.name,
+                        symbol=instrument.symbol,
+                        market_type="futures",
+                        tick_size=instrument.tick_size,
+                    )
+                    for instrument in instruments
+                }
+                last_update_ids: dict[str, int] = {}
+                for instrument in instruments:
+                    book = batch_books.get(instrument.symbol)
+                    if book is None:
+                        continue
+                    states[instrument.symbol].replace(book.bids, book.asks)
+                    last_update_ids[instrument.symbol] = book.last_update_id
+
                 try:
                     async with session.ws_connect(ws_url, heartbeat=None) as ws:
                         print(f"[aster] ws_connected batch={len(instruments)}", flush=True)
@@ -158,9 +245,14 @@ class AsterFuturesAdapter(ExchangeAdapter):
                             symbol = self._symbol_from_stream_name(stream_name or payload.get("s", ""))
                             if symbol not in states:
                                 continue
+                            update_id = int(payload.get("u", 0))
+                            if update_id and update_id <= last_update_ids.get(symbol, 0):
+                                continue
                             bids = [(float(price), float(size)) for price, size in payload["b"]]
                             asks = [(float(price), float(size)) for price, size in payload["a"]]
-                            states[symbol].replace(bids, asks)
+                            states[symbol].apply_delta(bids, asks)
+                            if update_id:
+                                last_update_ids[symbol] = update_id
                             snapshot = states[symbol].to_snapshot(datetime.now(timezone.utc))
                             if snapshot is None:
                                 continue
@@ -185,7 +277,7 @@ class AsterFuturesAdapter(ExchangeAdapter):
 
     @staticmethod
     def _stream_name_for(symbol: str) -> str:
-        return f"{symbol.lower()}@depth20@100ms"
+        return f"{symbol.lower()}@depth@100ms"
 
     @classmethod
     def _ws_url_for_streams(cls, stream_names: list[str]) -> str:

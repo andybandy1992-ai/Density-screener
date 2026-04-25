@@ -28,13 +28,13 @@ class AsterAdapterTests(unittest.TestCase):
     def test_stream_name_helpers_support_combined_streams(self) -> None:
         stream = AsterFuturesAdapter._stream_name_for("BTCUSDT")
 
-        self.assertEqual(stream, "btcusdt@depth20@100ms")
+        self.assertEqual(stream, "btcusdt@depth@100ms")
         self.assertEqual(AsterFuturesAdapter._symbol_from_stream_name(stream), "BTCUSDT")
         self.assertEqual(
             AsterFuturesAdapter._ws_url_for_streams([stream]),
-            "wss://fstream.asterdex.com/ws/btcusdt@depth20@100ms",
+            "wss://fstream.asterdex.com/ws/btcusdt@depth@100ms",
         )
         self.assertEqual(
-            AsterFuturesAdapter._ws_url_for_streams([stream, "ethusdt@depth20@100ms"]),
-            "wss://fstream.asterdex.com/stream?streams=btcusdt@depth20@100ms/ethusdt@depth20@100ms",
+            AsterFuturesAdapter._ws_url_for_streams([stream, "ethusdt@depth@100ms"]),
+            "wss://fstream.asterdex.com/stream?streams=btcusdt@depth@100ms/ethusdt@depth@100ms",
         )
