@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Density Screener maintenance every 3 days
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=3d
+RandomizedDelaySec=30min
+Persistent=true
+Unit=density-screener-maintenance.service
+
+[Install]
+WantedBy=timers.target

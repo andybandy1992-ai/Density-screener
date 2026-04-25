@@ -66,6 +66,23 @@ By default this is:
 5. Start the service:
    - `sudo systemctl start density-screener`
 
+## Maintenance cleanup
+
+The VPS can run a small cleanup job every 3 days. It vacuums `journald` and removes Python/test caches from the project directory. This helps disk/log growth, but it does not reduce exchange websocket bandwidth already counted by the VPS provider.
+
+Install it once:
+
+- `sudo cp deploy/systemd/density-screener-maintenance.service.example /etc/systemd/system/density-screener-maintenance.service`
+- `sudo cp deploy/systemd/density-screener-maintenance.timer.example /etc/systemd/system/density-screener-maintenance.timer`
+- `sudo systemctl daemon-reload`
+- `sudo systemctl enable --now density-screener-maintenance.timer`
+
+Useful maintenance commands:
+
+- `sudo systemctl list-timers density-screener-maintenance.timer`
+- `sudo systemctl start density-screener-maintenance.service`
+- `sudo journalctl -u density-screener-maintenance.service -n 100 --no-pager`
+
 ## Useful commands
 
 - `sudo systemctl status density-screener`

@@ -90,6 +90,7 @@ Use `/health` in Telegram to get a live status report from the running process.
 The report includes:
 
 - service uptime;
+- system load, memory, disk, and network counters when available on the host;
 - Telegram alert/control status;
 - runtime state file path;
 - one line per exchange with status, snapshot count, signal count, and last snapshot age.
@@ -152,6 +153,8 @@ Important behavior:
 ## VPS
 
 The repo now includes a ready-to-adapt `systemd` unit example and a short VPS setup note in `docs/vps_deploy.md`.
+
+It also includes an optional `systemd` maintenance timer that can run every 3 days to vacuum server logs and remove local Python/test caches.
 
 ## GitHub publication
 

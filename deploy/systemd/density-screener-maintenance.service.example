@@ -1,0 +1,12 @@
+[Unit]
+Description=Density Screener maintenance cleanup
+
+[Service]
+Type=oneshot
+Environment=APP_DIR=/opt/density-screener
+Environment=JOURNAL_VACUUM_TIME=7d
+Environment=JOURNAL_VACUUM_SIZE=200M
+ExecStart=/usr/bin/env bash /opt/density-screener/deploy/scripts/density_screener_maintenance.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
