@@ -186,6 +186,7 @@ class LighterAdapter(ExchangeAdapter):
         }
 
         async with aiohttp.ClientSession() as session:
+            reconnect_backoff_seconds = 1.0
             while True:
                 states = {
                     market_id: OrderBookState(
@@ -244,7 +245,10 @@ class LighterAdapter(ExchangeAdapter):
                                 states[market_id].apply_delta(bids, asks)
 
                             last_nonces[market_id] = nonce
-                            snapshot = states[market_id].to_snapshot(datetime.now(timezone.utc))
+                            timestamp = datetime.now(timezone.utc)
+                            if not runtime.should_process_snapshot(self.name, instrument.symbol, timestamp):
+                                continue
+                            snapshot = states[market_id].to_snapshot(timestamp)
                             if snapshot is None:
                                 continue
                             signals = await runtime.handle_snapshot(
@@ -266,14 +270,16 @@ class LighterAdapter(ExchangeAdapter):
                     raise RuntimeError("Lighter websocket closed unexpectedly")
                 except _ResyncRequired as error:
                     print(f"[lighter] reconnecting_batch reason={error}", flush=True)
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(reconnect_backoff_seconds)
+                    reconnect_backoff_seconds = min(reconnect_backoff_seconds * 2, 30.0)
                     continue
                 except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as error:
                     print(
                         f"[lighter] reconnecting_batch reason={error.__class__.__name__}: {error}",
                         flush=True,
                     )
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(reconnect_backoff_seconds)
+                    reconnect_backoff_seconds = min(reconnect_backoff_seconds * 2, 30.0)
                     continue
 
     @classmethod

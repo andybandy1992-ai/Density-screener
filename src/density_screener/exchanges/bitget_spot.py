@@ -191,6 +191,7 @@ class BitgetSpotAdapter(ExchangeAdapter):
             await asyncio.sleep(initial_delay_seconds)
 
         async with aiohttp.ClientSession() as session:
+            reconnect_backoff_seconds = 1.0
             while True:
                 states = {
                     instrument.symbol: OrderBookState(
@@ -225,11 +226,14 @@ class BitgetSpotAdapter(ExchangeAdapter):
                                 data_rows = payload.get("data", [])
                                 if not data_rows:
                                     continue
+                                timestamp = datetime.now(timezone.utc)
+                                if not runtime.should_process_snapshot(self.name, symbol, timestamp):
+                                    continue
                                 data = data_rows[0]
                                 bids = [(float(price), float(size)) for price, size in data.get("bids", [])]
                                 asks = [(float(price), float(size)) for price, size in data.get("asks", [])]
                                 states[symbol].replace(bids, asks)
-                                snapshot = states[symbol].to_snapshot(datetime.now(timezone.utc))
+                                snapshot = states[symbol].to_snapshot(timestamp)
                                 if snapshot is None:
                                     continue
                                 signals = await runtime.handle_snapshot(snapshot, volume_references[symbol])
@@ -253,5 +257,6 @@ class BitgetSpotAdapter(ExchangeAdapter):
                         f"[bitget_spot] reconnecting_batch reason={error.__class__.__name__}: {error}",
                         flush=True,
                     )
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(reconnect_backoff_seconds)
+                    reconnect_backoff_seconds = min(reconnect_backoff_seconds * 2, 30.0)
                     continue

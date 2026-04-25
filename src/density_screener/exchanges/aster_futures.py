@@ -206,6 +206,7 @@ class AsterFuturesAdapter(ExchangeAdapter):
 
         async with aiohttp.ClientSession() as session:
             first_connect = True
+            reconnect_backoff_seconds = 1.0
             while True:
                 if first_connect:
                     batch_books = initial_books
@@ -256,7 +257,10 @@ class AsterFuturesAdapter(ExchangeAdapter):
                             states[symbol].apply_delta(bids, asks)
                             if update_id:
                                 last_update_ids[symbol] = update_id
-                            snapshot = states[symbol].to_snapshot(datetime.now(timezone.utc))
+                            timestamp = datetime.now(timezone.utc)
+                            if not runtime.should_process_snapshot(self.name, symbol, timestamp):
+                                continue
+                            snapshot = states[symbol].to_snapshot(timestamp)
                             if snapshot is None:
                                 continue
                             signals = await runtime.handle_snapshot(snapshot, volume_references[symbol])
@@ -275,7 +279,8 @@ class AsterFuturesAdapter(ExchangeAdapter):
                         f"[aster] reconnecting_batch reason={error.__class__.__name__}: {error}",
                         flush=True,
                     )
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(reconnect_backoff_seconds)
+                    reconnect_backoff_seconds = min(reconnect_backoff_seconds * 2, 30.0)
                     continue
 
     @staticmethod

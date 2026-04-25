@@ -72,6 +72,24 @@ class RuntimeTests(unittest.TestCase):
 
         self.assertEqual(runtime.stats.snapshots_processed, 2)
 
+    def test_snapshot_throttle_slot_can_be_reserved_before_building_snapshot(self) -> None:
+        detector = DensityDetector(make_config())
+        runtime = ScreenerRuntime(detector, snapshot_process_interval_seconds=1.0)
+        reference = VolumeReference(avg_candle_notional=10_000.0, candle_count=14, interval="5m")
+        started = datetime(2026, 4, 13, 20, 0, 0, tzinfo=timezone.utc)
+
+        self.assertTrue(runtime.should_process_snapshot("bybit_spot", "ICPUSDT", started))
+        asyncio.run(runtime.handle_snapshot(make_snapshot(started), reference))
+        self.assertFalse(
+            runtime.should_process_snapshot(
+                "bybit_spot",
+                "ICPUSDT",
+                started.replace(microsecond=500_000),
+            )
+        )
+
+        self.assertEqual(runtime.stats.snapshots_processed, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

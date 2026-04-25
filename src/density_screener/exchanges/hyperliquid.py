@@ -155,6 +155,7 @@ class HyperliquidAdapter(ExchangeAdapter):
         stop_after_snapshots: int | None = None,
     ) -> None:
         async with aiohttp.ClientSession() as session:
+            reconnect_backoff_seconds = 1.0
             while True:
                 states = {
                     instrument.symbol: OrderBookState(
@@ -192,6 +193,9 @@ class HyperliquidAdapter(ExchangeAdapter):
 
                             book = payload["data"]
                             symbol = book["coin"]
+                            timestamp = datetime.now(timezone.utc)
+                            if not runtime.should_process_snapshot(self.name, symbol, timestamp):
+                                continue
                             bid_levels = book["levels"][0]
                             ask_levels = book["levels"][1]
                             raw_bids = [(float(level["px"]), float(level["sz"])) for level in bid_levels]
@@ -202,7 +206,7 @@ class HyperliquidAdapter(ExchangeAdapter):
                             bids = self._aggregate_levels(raw_bids, side="bid", mid_price=mid_price)
                             asks = self._aggregate_levels(raw_asks, side="ask", mid_price=mid_price)
                             states[symbol].replace(bids, asks)
-                            snapshot = states[symbol].to_snapshot(datetime.now(timezone.utc))
+                            snapshot = states[symbol].to_snapshot(timestamp)
                             if snapshot is None:
                                 continue
                             signals = await runtime.handle_snapshot(snapshot, volume_references[symbol])
@@ -224,7 +228,8 @@ class HyperliquidAdapter(ExchangeAdapter):
                         f"[hyperliquid] reconnecting_batch reason={error.__class__.__name__}: {error}",
                         flush=True,
                     )
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(reconnect_backoff_seconds)
+                    reconnect_backoff_seconds = min(reconnect_backoff_seconds * 2, 30.0)
                     continue
 
     async def _post_info(

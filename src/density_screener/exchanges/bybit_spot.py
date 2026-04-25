@@ -158,7 +158,10 @@ class BybitSpotAdapter(ExchangeAdapter):
                             continue
                         self._apply_message(states, payload)
                         symbol = payload["data"]["s"]
-                        snapshot = states[symbol].to_snapshot(datetime.now(timezone.utc))
+                        timestamp = datetime.now(timezone.utc)
+                        if not runtime.should_process_snapshot(self.name, symbol, timestamp):
+                            continue
+                        snapshot = states[symbol].to_snapshot(timestamp)
                         if snapshot is None:
                             continue
                         signals = await runtime.handle_snapshot(snapshot, volume_references[symbol])

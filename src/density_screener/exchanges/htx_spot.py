@@ -185,11 +185,14 @@ class HTXSpotAdapter(ExchangeAdapter):
 
                     channel = payload["ch"]
                     symbol = channel.split(".")[1]
+                    timestamp = datetime.now(timezone.utc)
+                    if not runtime.should_process_snapshot(self.name, symbol, timestamp):
+                        continue
                     tick = payload["tick"]
                     bids = [(float(price), float(size)) for price, size in tick["bids"]]
                     asks = [(float(price), float(size)) for price, size in tick["asks"]]
                     states[symbol].replace(bids, asks)
-                    snapshot = states[symbol].to_snapshot(datetime.now(timezone.utc))
+                    snapshot = states[symbol].to_snapshot(timestamp)
                     if snapshot is None:
                         continue
                     signals = await runtime.handle_snapshot(snapshot, volume_references[symbol])

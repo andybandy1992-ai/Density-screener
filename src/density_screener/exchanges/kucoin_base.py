@@ -146,12 +146,15 @@ class KuCoinAdapterBase(ExchangeAdapter):
                             continue
 
                         symbol = self._symbol_from_topic(payload["topic"])
+                        timestamp = datetime.now(timezone.utc)
+                        if not runtime.should_process_snapshot(self.name, symbol, timestamp):
+                            continue
                         state = states[symbol]
                         book = payload["data"]
                         bids = [(float(price), float(size)) for price, size in book["bids"]]
                         asks = [(float(price), float(size)) for price, size in book["asks"]]
                         state.replace(bids, asks)
-                        snapshot = state.to_snapshot(datetime.now(timezone.utc))
+                        snapshot = state.to_snapshot(timestamp)
                         if snapshot is None:
                             continue
                         signals = await runtime.handle_snapshot(snapshot, volume_references[symbol])
