@@ -15,6 +15,7 @@ same_price_cooldown_seconds = 60
 symmetry_notional_tolerance_pct = 20
 symmetry_distance_tolerance_pct = 15
 suppress_top_ticks = 0
+snapshot_process_interval_seconds = 1.0
 
 [telegram]
 enabled = false

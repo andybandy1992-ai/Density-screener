@@ -16,6 +16,9 @@ same_price_cooldown_seconds = 86400
 symmetry_notional_tolerance_pct = 20.0
 symmetry_distance_tolerance_pct = 15.0
 suppress_top_ticks = 0
+# Process at most one snapshot per symbol every N seconds.
+# Densities must live at least 5s, so 1s keeps signal quality while reducing CPU.
+snapshot_process_interval_seconds = 1.0
 
 [telegram]
 enabled = false

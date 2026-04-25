@@ -24,18 +24,20 @@ class _InitialOrderBook:
 class AsterFuturesAdapter(ExchangeAdapter):
     REST_BASE = "https://fapi.asterdex.com"
     WS_ROOT = "wss://fstream.asterdex.com"
-    DEPTH_LIMIT = 1000
+    DEPTH_LIMIT = 500
 
     def __init__(
         self,
         detection: DetectionConfig,
         *,
         subscription_batch_size: int = 10,
-        depth_bootstrap_concurrency: int = 5,
+        depth_bootstrap_concurrency: int = 1,
+        depth_bootstrap_delay_seconds: float = 0.35,
     ) -> None:
         self._detection = detection
         self._subscription_batch_size = subscription_batch_size
         self._depth_bootstrap_concurrency = depth_bootstrap_concurrency
+        self._depth_bootstrap_delay_seconds = depth_bootstrap_delay_seconds
 
     @property
     def name(self) -> str:
@@ -155,6 +157,7 @@ class AsterFuturesAdapter(ExchangeAdapter):
         async with aiohttp.ClientSession() as session:
             async def load_one(instrument: ExchangeInstrument) -> None:
                 async with semaphore:
+                    await asyncio.sleep(self._depth_bootstrap_delay_seconds)
                     try:
                         books[instrument.symbol] = await self._fetch_initial_order_book(
                             instrument.symbol,

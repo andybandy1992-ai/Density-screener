@@ -60,6 +60,18 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(len(signals), 1)
         self.assertEqual(runtime.stats.signals_emitted, 1)
 
+    def test_snapshot_throttle_limits_detector_work_per_symbol(self) -> None:
+        detector = DensityDetector(make_config())
+        runtime = ScreenerRuntime(detector, snapshot_process_interval_seconds=1.0)
+        reference = VolumeReference(avg_candle_notional=10_000.0, candle_count=14, interval="5m")
+        started = datetime(2026, 4, 13, 20, 0, 0, tzinfo=timezone.utc)
+
+        asyncio.run(runtime.handle_snapshot(make_snapshot(started), reference))
+        asyncio.run(runtime.handle_snapshot(make_snapshot(started.replace(microsecond=500_000)), reference))
+        asyncio.run(runtime.handle_snapshot(make_snapshot(started.replace(second=1)), reference))
+
+        self.assertEqual(runtime.stats.snapshots_processed, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

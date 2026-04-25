@@ -95,6 +95,11 @@ The report includes:
 - runtime state file path;
 - one line per exchange with status, snapshot count, signal count, and last snapshot age.
 
+## Load Control
+
+The service processes at most one order book snapshot per symbol every `snapshot_process_interval_seconds`.
+The default is `1.0` second. This keeps the 5-second density lifetime logic intact while reducing CPU on small VPS plans.
+
 ## Useful commands
 
 - `python -m density_screener.cli doctor`

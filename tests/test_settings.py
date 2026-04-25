@@ -24,6 +24,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(config.blacklist_file, "blacklist.txt")
         self.assertIn("bybit_spot", config.exchanges)
         self.assertEqual(config.exchanges["bybit_spot"].market_type, "spot")
+        self.assertEqual(config.detection.snapshot_process_interval_seconds, 1.0)
         self.assertTrue(config.blacklist.matches("AAAUSDT"))
         self.assertTrue(config.blacklist.matches("BTCUSDT", {"baseCoin": "BTC"}))
         self.assertTrue(config.blacklist.matches("FOO_TEST_BAR"))

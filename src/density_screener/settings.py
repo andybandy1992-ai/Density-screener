@@ -23,6 +23,7 @@ class DetectionConfig:
     symmetry_notional_tolerance_pct: float
     symmetry_distance_tolerance_pct: float
     suppress_top_ticks: int
+    snapshot_process_interval_seconds: float = 1.0
 
     def min_notional_for(self, market_type: MarketType) -> float:
         if market_type == "spot":
@@ -93,6 +94,7 @@ def load_config(path: str | Path) -> AppConfig:
         symmetry_notional_tolerance_pct=float(detection_raw["symmetry_notional_tolerance_pct"]),
         symmetry_distance_tolerance_pct=float(detection_raw["symmetry_distance_tolerance_pct"]),
         suppress_top_ticks=int(detection_raw.get("suppress_top_ticks", 0)),
+        snapshot_process_interval_seconds=float(detection_raw.get("snapshot_process_interval_seconds", 1.0)),
     )
 
     telegram = TelegramConfig(

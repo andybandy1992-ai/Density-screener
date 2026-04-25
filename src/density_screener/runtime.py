@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from density_screener.detector import DensityDetector
 from density_screener.health import HealthMonitor
@@ -23,12 +24,15 @@ class ScreenerRuntime:
         controls: RuntimeControlStore | None = None,
         health: HealthMonitor | None = None,
         exchange_name: str = "",
+        snapshot_process_interval_seconds: float = 0.0,
     ) -> None:
         self._detector = detector
         self._notifier = notifier
         self._controls = controls
         self._health = health
         self._exchange_name = exchange_name
+        self._snapshot_process_interval_seconds = max(0.0, snapshot_process_interval_seconds)
+        self._last_processed_at: dict[tuple[str, str], datetime] = {}
         self.stats = RuntimeStats()
 
     async def handle_snapshot(
@@ -37,6 +41,8 @@ class ScreenerRuntime:
         volume_reference: VolumeReference,
     ) -> list[DensitySignal]:
         if self._controls is not None and self._controls.matches_blacklist(snapshot.symbol):
+            return []
+        if self._should_skip_snapshot(snapshot):
             return []
         self.stats.snapshots_processed += 1
         signals = self._detector.process(snapshot, volume_reference)
@@ -62,3 +68,15 @@ class ScreenerRuntime:
     @staticmethod
     def render_signal(signal: DensitySignal) -> str:
         return format_signal(signal)
+
+    def _should_skip_snapshot(self, snapshot: OrderBookSnapshot) -> bool:
+        if self._snapshot_process_interval_seconds <= 0:
+            return False
+        key = (snapshot.exchange, snapshot.symbol)
+        last_processed_at = self._last_processed_at.get(key)
+        if last_processed_at is not None:
+            elapsed = (snapshot.timestamp - last_processed_at).total_seconds()
+            if elapsed < self._snapshot_process_interval_seconds:
+                return True
+        self._last_processed_at[key] = snapshot.timestamp
+        return False

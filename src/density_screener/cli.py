@@ -131,6 +131,7 @@ def _doctor(config_path: Path) -> int:
     print(f"volume_multiplier={config.detection.volume_multiplier:.2f}")
     print(f"price_window_pct={config.detection.price_window_pct:.2f}")
     print(f"min_lifetime_seconds={config.detection.min_lifetime_seconds:.1f}")
+    print(f"snapshot_process_interval_seconds={config.detection.snapshot_process_interval_seconds:.2f}")
     print(f"blacklist_size={config.blacklist.entries_count}")
     print(f"runtime_blacklist_terms={len(controls.snapshot().blacklist_terms)}")
     print(f"blacklist_inline={len(config.global_blacklist)}")
@@ -364,6 +365,7 @@ async def _run_named_exchange(
         controls=controls,
         health=health,
         exchange_name=exchange_name,
+        snapshot_process_interval_seconds=config.detection.snapshot_process_interval_seconds,
     )
     adapter = ADAPTER_FACTORIES[exchange_name](config.detection)
     market_type = config.exchanges.get(exchange_name).market_type if exchange_name in config.exchanges else ""
